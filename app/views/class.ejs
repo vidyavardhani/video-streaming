@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Class - <%= classId %></title>
+  <link rel="stylesheet" href="/public/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app" data-class-id="<%= classId %>">
+    <header class="app-header">
+      <div class="logo">EduMeet</div>
+      <div class="meeting-info">
+        <span id="meeting-title">Live Classroom</span>
+        <span id="meeting-code"></span>
+      </div>
+      <div class="user-info">
+        <span id="user-name"></span>
+        <button id="open-info" class="ghost-btn">Info</button>
+      </div>
+    </header>
+
+    <main class="app-content">
+      <section id="join-screen" class="panel active">
+        <div class="join-video-wrapper">
+          <video id="preview-video" autoplay muted playsinline></video>
+          <div class="preview-overlay">Preview</div>
+        </div>
+        <div class="join-controls">
+          <input type="text" id="display-name" placeholder="Enter your name">
+          <div class="toggle-row">
+            <button id="toggle-mic" class="control-btn">🎤 Mic</button>
+            <button id="toggle-camera" class="control-btn">📷 Camera</button>
+          </div>
+          <div class="join-actions">
+            <button id="join-class" class="primary-btn">Join Class</button>
+            <button id="start-class" class="primary-btn host-only">Start Class</button>
+          </div>
+          <div class="meeting-meta">
+            <div class="meta-row">
+              <span>Meeting link</span>
+              <button id="copy-link" class="ghost-btn">Copy</button>
+            </div>
+            <div class="meta-row">
+              <span>Meeting code</span>
+              <button id="copy-code" class="ghost-btn"></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="lobby-screen" class="panel">
+        <div class="lobby-card">
+          <h2>Waiting Room</h2>
+          <p id="lobby-message">Waiting for host to let you in...</p>
+          <div id="lobby-list" class="lobby-list"></div>
+        </div>
+      </section>
+
+      <section id="live-screen" class="panel">
+        <div class="meeting-stage">
+          <div id="main-video" class="video-grid"></div>
+        </div>
+        <aside class="meeting-sidebar">
+          <div class="tab-header">
+            <button class="tab-btn active" data-tab="chat">Chat</button>
+            <button class="tab-btn" data-tab="people">People</button>
+          </div>
+          <div id="chat-tab" class="tab-body active">
+            <div id="chat-messages" class="chat-messages"></div>
+            <form id="chat-form" class="chat-input">
+              <input type="text" id="chat-text" placeholder="Send a message" autocomplete="off">
+              <button type="submit">Send</button>
+            </form>
+          </div>
+          <div id="people-tab" class="tab-body">
+            <ul id="participants-list"></ul>
+          </div>
+        </aside>
+      </section>
+
+      <section id="end-screen" class="panel">
+        <div class="end-card">
+          <h2>The class has ended.</h2>
+          <button id="return-dashboard" class="primary-btn">Return to dashboard</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="control-bar">
+      <button id="live-toggle-mic" class="control-btn">🎤</button>
+      <button id="live-toggle-camera" class="control-btn">📷</button>
+      <button id="screen-share" class="control-btn host-only">🖥</button>
+      <button id="end-call" class="danger-btn">Leave</button>
+    </footer>
+  </div>
+
+  <div id="meeting-info-modal" class="modal hidden">
+    <div class="modal-content">
+      <button id="close-modal" class="ghost-btn close-btn">✕</button>
+      <h2>Meeting details</h2>
+      <p><strong>Title:</strong> <span id="modal-title"></span></p>
+      <p><strong>Code:</strong> <span id="modal-code"></span></p>
+      <p><strong>Link:</strong> <span id="modal-link"></span></p>
+      <h3>Participants</h3>
+      <ul id="modal-participants"></ul>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    window.APP_CONFIG = {
+      classId: '<%= classId %>'
+    };
+  </script>
+  <script src="/public/js/script.js"></script>
+</body>
+</html>
