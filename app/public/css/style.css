@@ -402,6 +402,35 @@ button.primary.small {
   align-items: center;
 }
 
+body.is-student .preview-video-wrapper.viewer-mode::before {
+  content: 'You will watch the host. No camera or microphone needed.';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+body.is-student .preview-video-wrapper.viewer-mode video {
+  display: none;
+}
+
+body.is-student .preview-controls.viewer-only {
+  justify-content: flex-end;
+}
+
+body.is-student .preview-controls.viewer-only .hidden {
+  display: none !important;
+}
+
+body.is-student #join-btn {
+  flex: 1;
+}
+
 .status-card {
   background: var(--panel);
   padding: 2.5rem;

@@ -36,7 +36,8 @@
     recording: { isRecording: false },
     raisedHands: new Map(),
     mediaStates: new Map(),
-    handRaised: false
+    handRaised: false,
+    previewReady: false
   };
 
   const elements = {
@@ -46,6 +47,8 @@
     liveView: document.getElementById('live-view'),
     endedView: document.getElementById('ended-view'),
     previewVideo: document.getElementById('preview-video'),
+    previewWrapper: document.querySelector('.preview-video-wrapper'),
+    previewControls: document.querySelector('.preview-controls'),
     primaryContainer: document.getElementById('stage-main'),
     primaryVideo: document.getElementById('primary-video'),
     primaryLabel: document.getElementById('primary-label'),
@@ -954,20 +957,31 @@
   };
 
   const setupPreview = async () => {
+    if (state.previewReady && (state.isHost ? !!state.localStream : true)) {
+      return;
+    }
+
+    if (!state.isHost) {
+      state.previewReady = true;
+      if (elements.previewVideo) {
+        elements.previewVideo.srcObject = null;
+      }
+      refreshStage();
+      syncTrackButtons();
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       state.localStream = stream;
+      state.previewReady = true;
       if (elements.previewVideo) {
         setVideoSource(elements.previewVideo, stream, true);
-      }
-      if (!state.isHost) {
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = false;
-        });
       }
       refreshStage();
       syncTrackButtons();
     } catch (error) {
+      state.previewReady = true;
       console.warn('Media error', error);
     }
   };
@@ -1345,7 +1359,7 @@
     const pc = new RTCPeerConnection(rtcConfig);
     state.peers.set(targetToken, pc);
 
-    if (state.localStream) {
+    if (state.isHost && state.localStream) {
       state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
     }
     if (state.isHost && state.screenStream) {
@@ -1825,6 +1839,7 @@
   };
 
   const bindTrackToggles = () => {
+    if (!state.isHost) return;
     elements.muteBtn?.addEventListener('click', () => toggleTrack('audio'));
     elements.cameraBtn?.addEventListener('click', () => toggleTrack('video'));
     elements.liveMicToggle?.addEventListener('click', () => toggleTrack('audio'));
@@ -1881,6 +1896,15 @@
       elements.participantStrip.classList.add('hidden');
     } else if (state.isHost && elements.participantStrip) {
       elements.participantStrip.classList.remove('hidden');
+    }
+    if (!state.isHost) {
+      elements.muteBtn?.classList.add('hidden');
+      elements.cameraBtn?.classList.add('hidden');
+      elements.previewControls?.classList.add('viewer-only');
+      elements.previewWrapper?.classList.add('viewer-mode');
+      if (elements.joinButton) {
+        elements.joinButton.textContent = 'Ask to join';
+      }
     }
     await setupPreview();
     bindTrackToggles();
