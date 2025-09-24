@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Class</title>
+  <link rel="stylesheet" href="/public/css/style.css">
+</head>
+<body>
+  <div id="class-app" data-class-id="<%= classId %>">
+    <section id="join-view">
+      <div class="preview-panel">
+        <header style="display:flex; justify-content: space-between; align-items: center; margin-bottom:1.5rem;">
+          <div>
+            <h1 id="meeting-title">Live Class</h1>
+            <p class="tag">Code: <span id="meeting-code">—</span></p>
+          </div>
+          <div style="display:flex; gap:0.75rem;">
+            <button id="copy-link" class="ghost" data-link="">Copy link</button>
+            <button id="copy-code" class="ghost" data-code="">Copy code</button>
+          </div>
+        </header>
+        <div class="preview-video-wrapper">
+          <video id="preview-video" autoplay muted playsinline></video>
+        </div>
+        <label for="display-name">Your name</label>
+        <input id="display-name" type="text" placeholder="Enter your name">
+        <div class="controls" style="margin-top:1.5rem;">
+          <button class="ghost" id="toggle-mic">Mic</button>
+          <button class="ghost" id="toggle-camera">Camera</button>
+          <button class="primary" id="join-btn">Join class</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="lobby-view" class="hidden">
+      <div class="lobby-panel">
+        <h1>Waiting room</h1>
+        <p id="waiting-message" style="color: var(--muted);">Waiting for the host to let you in…</p>
+      </div>
+    </section>
+
+    <section id="host-lobby" class="hidden">
+      <div class="lobby-panel">
+        <header style="display:flex; justify-content: space-between; align-items:center;">
+          <div>
+            <h1 id="meeting-title-host">Class lobby</h1>
+            <p style="color: var(--muted);">Start the class when you're ready.</p>
+          </div>
+          <button id="start-btn" class="primary">Start class</button>
+        </header>
+        <h2 style="margin-top:1.5rem;">Waiting students</h2>
+        <ul id="lobby-list" class="lobby-list"></ul>
+      </div>
+    </section>
+
+    <section id="live-view" class="hidden">
+      <div class="live-layout">
+        <div class="primary-video">
+          <div class="video-grid" id="video-grid">
+            <div class="video-tile" data-local>
+              <video id="local-video" autoplay muted playsinline></video>
+              <span class="label">You</span>
+            </div>
+          </div>
+          <div class="controls">
+            <button id="screen-share" class="ghost">Share screen</button>
+            <button id="leave-btn" class="ghost">Leave</button>
+            <button id="end-btn" class="danger ghost hidden">End class</button>
+          </div>
+        </div>
+        <aside class="sidebar">
+          <section class="chat-panel">
+            <h2>Chat</h2>
+            <div id="chat-messages" class="chat-messages"></div>
+            <form id="chat-form">
+              <input id="chat-text" type="text" placeholder="Send a message">
+            </form>
+          </section>
+          <section>
+            <h2>Participants</h2>
+            <ul id="participants-list" class="participants"></ul>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section id="ended-view" class="hidden">
+      <div class="end-panel">
+        <h1>The class has ended</h1>
+        <a href="/" class="secondary">Return to dashboard</a>
+      </div>
+    </section>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/public/js/class.js" defer></script>
+</body>
+</html>
