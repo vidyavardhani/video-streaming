@@ -2,6 +2,13 @@ const { validationResult } = require('express-validator');
 const { v4: uuid } = require('uuid');
 const ClassModel = require('../models/Class');
 const { getIO } = require('../sockets/manager');
+const {
+  ensureChatRoom,
+  ensureWhiteboard,
+  startParticipantSession,
+  endParticipantSession
+} = require('../utils/classState');
+const recordingService = require('../services/recordingService');
 
 const baseUrl = () => process.env.BASE_URL || 'http://localhost:4000';
 
@@ -28,29 +35,65 @@ const findClassByCode = async (code) => {
   return ClassModel.findOne({ meetingCode: code });
 };
 
-const publicClassShape = (klass) => ({
-  id: klass.meetingCode,
-  code: klass.meetingCode,
-  title: klass.title,
-  status: klass.status,
-  meetingLink: klass.meetingLink || `${baseUrl()}/class/${klass.meetingCode}`,
-  meetingCode: klass.meetingCode,
-  host: klass.host ? {
-    id: klass.host._id,
-    name: klass.host.name,
-    email: klass.host.email
-  } : null,
-  lobby: klass.lobby.map((entry) => ({
-    displayName: entry.displayName,
-    token: entry.token,
-    requestedAt: entry.requestedAt
-  })),
-  participants: klass.participants.map((entry) => ({
-    displayName: entry.displayName,
-    token: entry.token,
-    joinedAt: entry.joinedAt
-  }))
-});
+const getHostId = (klass) => {
+  if (!klass || !klass.host) return null;
+  if (klass.host._id) {
+    return klass.host._id.toString();
+  }
+  return klass.host.toString();
+};
+
+const publicClassShape = (klass) => {
+  if (!klass) return null;
+  const lobbyEntries = Array.isArray(klass.lobby) ? klass.lobby : [];
+  const participantEntries = Array.isArray(klass.participants) ? klass.participants : [];
+  const activeParticipants = participantEntries.filter((entry) => !entry.expelledAt);
+  const hostRef = klass.host || null;
+  const hostId = hostRef?._id || hostRef;
+  const hostDetails = hostRef
+    ? {
+        id: hostId ? hostId.toString() : undefined,
+        name: hostRef.name || undefined,
+        email: hostRef.email || undefined
+      }
+    : null;
+  return {
+    id: klass.meetingCode,
+    code: klass.meetingCode,
+    title: klass.title,
+    status: klass.status,
+    meetingLink: klass.meetingLink || `${baseUrl()}/class/${klass.meetingCode}`,
+    meetingCode: klass.meetingCode,
+    chatRoomId: klass.chatRoomId,
+    host: hostDetails,
+    lobby: lobbyEntries.map((entry) => ({
+      displayName: entry.displayName,
+      token: entry.token,
+      requestedAt: entry.requestedAt
+    })),
+    participants: activeParticipants.map((entry) => ({
+      displayName: entry.displayName,
+      token: entry.token,
+      joinedAt: entry.joinedAt,
+      mediaState: entry.mediaState || { audio: true, video: true },
+      handRaisedAt: entry.handRaisedAt,
+      allowedToSpeakAt: entry.allowedToSpeakAt,
+      sessions: entry.sessions || []
+    })),
+    attendance: participantEntries.map((entry) => ({
+      displayName: entry.displayName,
+      token: entry.token,
+      sessions: entry.sessions || [],
+      expelledAt: entry.expelledAt
+    })),
+    whiteboard: klass.whiteboard || { strokes: [], updatedAt: null },
+    activePoll: klass.activePoll || null,
+    pollHistory: klass.pollHistory || [],
+    questions: klass.questions || [],
+    recording: klass.recording || { isRecording: false },
+    recordedVideoLink: klass.recordedVideoLink || null
+  };
+};
 
 exports.create = async (req, res) => {
   const errors = validationResult(req);
@@ -70,7 +113,10 @@ exports.create = async (req, res) => {
       meetingCode
     });
     klass.meetingLink = `${baseUrl()}/class/${meetingCode}`;
+    ensureChatRoom(klass);
+    ensureWhiteboard(klass);
     await klass.save();
+    await klass.populate('host');
     return res.status(201).json({
       classCode: klass.meetingCode,
       meetingLink: klass.meetingLink,
@@ -88,13 +134,15 @@ exports.start = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (klass.host.toString() !== req.user._id.toString()) {
+    if (getHostId(klass) !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Only host can start class' });
     }
     if (klass.status === 'ended') {
       return res.status(400).json({ message: 'Class already ended' });
     }
 
+    ensureChatRoom(klass);
+    ensureWhiteboard(klass);
     klass.status = 'live';
     klass.startTime = new Date();
     await klass.save();
@@ -114,7 +162,7 @@ exports.end = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (klass.host.toString() !== req.user._id.toString()) {
+    if (getHostId(klass) !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Only host can end class' });
     }
     if (klass.status === 'ended') {
@@ -123,11 +171,27 @@ exports.end = async (req, res) => {
 
     klass.status = 'ended';
     klass.endTime = new Date();
-    klass.participants = [];
     klass.lobby = [];
+    (klass.participants || []).forEach((participant) => {
+      endParticipantSession(participant);
+      participant.socketId = null;
+      participant.handRaisedAt = null;
+      participant.allowedToSpeakAt = null;
+      participant.mediaState = participant.mediaState || { audio: true, video: true };
+    });
+
+    if (klass.recording?.isRecording) {
+      await recordingService.stopRecording(klass);
+    }
     await klass.save();
 
     getIO().to(klass.meetingCode).emit('class:ended', { classCode: klass.meetingCode });
+    if (klass.recording) {
+      getIO().to(klass.meetingCode).emit('recording:status', {
+        recording: klass.recording,
+        recordedVideoLink: klass.recordedVideoLink
+      });
+    }
 
     return res.json({ message: 'Class ended' });
   } catch (error) {
@@ -159,6 +223,11 @@ exports.join = async (req, res) => {
     });
 
     if (existingParticipant) {
+      if (existingParticipant.expelledAt) {
+        return res.status(403).json({ message: 'You have been removed from the class' });
+      }
+      startParticipantSession(existingParticipant);
+      await klass.save();
       return res.json({
         message: 'Already admitted',
         joinToken: existingParticipant.token,
@@ -191,10 +260,13 @@ exports.join = async (req, res) => {
     klass.lobby.push(entry);
     await klass.save();
 
-    getIO().to(klass.host.toString()).emit('lobby:update', {
+    const hostId = getHostId(klass);
+    if (hostId) {
+      getIO().to(hostId).emit('lobby:update', {
       classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
+    }
 
     return res.status(201).json({
       message: 'Waiting for host approval',
@@ -217,7 +289,7 @@ exports.admit = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (klass.host.toString() !== req.user._id.toString()) {
+    if (getHostId(klass) !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Only host can admit students' });
     }
 
@@ -231,7 +303,9 @@ exports.admit = async (req, res) => {
       user: lobbyEntry.user,
       displayName: lobbyEntry.displayName,
       token: lobbyEntry.token,
-      joinedAt: new Date()
+      joinedAt: new Date(),
+      mediaState: { audio: true, video: true },
+      sessions: [{ joinedAt: new Date() }]
     };
     klass.participants.push(participant);
     await klass.save();
@@ -247,10 +321,13 @@ exports.admit = async (req, res) => {
     const io = getIO();
     io.to(klass.meetingCode).emit('participant:joined', payload);
     io.to(participant.token).emit('participant:approved', payload);
-    io.to(klass.host.toString()).emit('lobby:update', {
+    const hostId = getHostId(klass);
+    if (hostId) {
+      io.to(hostId).emit('lobby:update', {
       classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
+    }
 
     return res.json({ message: 'Student admitted', participant: payload.participant });
   } catch (error) {
@@ -270,7 +347,7 @@ exports.remove = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (klass.host.toString() !== req.user._id.toString()) {
+    if (getHostId(klass) !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Only host can remove students' });
     }
 
@@ -279,7 +356,10 @@ exports.remove = async (req, res) => {
     let removed = null;
 
     if (participantIndex !== -1) {
-      removed = klass.participants.splice(participantIndex, 1)[0];
+      removed = klass.participants[participantIndex];
+      endParticipantSession(removed);
+      removed.expelledAt = new Date();
+      removed.socketId = null;
     } else if (lobbyIndex !== -1) {
       removed = klass.lobby.splice(lobbyIndex, 1)[0];
     }
@@ -293,10 +373,13 @@ exports.remove = async (req, res) => {
     const io = getIO();
     io.to(klass.meetingCode).emit('participant:removed', { joinToken });
     io.to(joinToken).emit('participant:removed', { joinToken });
-    io.to(klass.host.toString()).emit('lobby:update', {
+    const hostId = getHostId(klass);
+    if (hostId) {
+      io.to(hostId).emit('lobby:update', {
       classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
+    }
 
     return res.json({ message: 'Participant removed' });
   } catch (error) {

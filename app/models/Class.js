@@ -1,6 +1,25 @@
 const mongoose = require('mongoose');
 const { v4: uuid } = require('uuid');
 
+const participantSessionSchema = new mongoose.Schema({
+  joinedAt: {
+    type: Date,
+    default: Date.now
+  },
+  leftAt: Date
+}, { _id: false });
+
+const mediaStateSchema = new mongoose.Schema({
+  audio: {
+    type: Boolean,
+    default: true
+  },
+  video: {
+    type: Boolean,
+    default: true
+  }
+}, { _id: false });
+
 const participantSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -15,7 +34,18 @@ const participantSchema = new mongoose.Schema({
     default: uuid
   },
   socketId: String,
-  joinedAt: Date
+  joinedAt: Date,
+  mediaState: {
+    type: mediaStateSchema,
+    default: () => ({})
+  },
+  handRaisedAt: Date,
+  allowedToSpeakAt: Date,
+  expelledAt: Date,
+  sessions: {
+    type: [participantSessionSchema],
+    default: () => []
+  }
 }, { timestamps: true });
 
 const lobbySchema = new mongoose.Schema({
@@ -36,6 +66,99 @@ const lobbySchema = new mongoose.Schema({
     default: Date.now
   }
 }, { timestamps: false });
+
+const whiteboardStrokeSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: uuid
+  },
+  path: {
+    type: [{
+      x: Number,
+      y: Number
+    }],
+    default: () => []
+  },
+  color: {
+    type: String,
+    default: '#111827'
+  },
+  size: {
+    type: Number,
+    default: 3
+  },
+  author: String,
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: false });
+
+const whiteboardSchema = new mongoose.Schema({
+  strokes: {
+    type: [whiteboardStrokeSchema],
+    default: () => []
+  },
+  updatedAt: Date
+}, { _id: false });
+
+const pollOptionSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: uuid
+  },
+  label: String,
+  votes: {
+    type: Number,
+    default: 0
+  }
+}, { _id: false });
+
+const pollResponseSchema = new mongoose.Schema({
+  participantToken: String,
+  optionId: String,
+  respondedAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: false });
+
+const pollSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: uuid
+  },
+  question: String,
+  options: {
+    type: [pollOptionSchema],
+    default: () => []
+  },
+  responses: {
+    type: [pollResponseSchema],
+    default: () => []
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  closedAt: Date
+}, { _id: false });
+
+const questionSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: uuid
+  },
+  askedBy: String,
+  askedByName: String,
+  question: String,
+  answer: String,
+  askedAt: {
+    type: Date,
+    default: Date.now
+  },
+  answeredAt: Date
+}, { _id: false });
 
 const classSchema = new mongoose.Schema({
   title: {
@@ -58,6 +181,10 @@ const classSchema = new mongoose.Schema({
     unique: true,
     index: true
   },
+  chatRoomId: {
+    type: String,
+    default: uuid
+  },
   lobby: {
     type: [lobbySchema],
     default: []
@@ -67,7 +194,29 @@ const classSchema = new mongoose.Schema({
     default: []
   },
   startTime: Date,
-  endTime: Date
+  endTime: Date,
+  whiteboard: {
+    type: whiteboardSchema,
+    default: () => ({ strokes: [] })
+  },
+  activePoll: pollSchema,
+  pollHistory: {
+    type: [pollSchema],
+    default: () => []
+  },
+  questions: {
+    type: [questionSchema],
+    default: () => []
+  },
+  recording: {
+    isRecording: {
+      type: Boolean,
+      default: false
+    },
+    startedAt: Date,
+    fileKey: String
+  },
+  recordedVideoLink: String
 }, { timestamps: true });
 
 classSchema.pre('save', function generateTokens(next) {

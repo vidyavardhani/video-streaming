@@ -6,6 +6,11 @@ const chatSchema = new mongoose.Schema({
     ref: 'Class',
     required: true
   },
+  room: {
+    type: String,
+    required: true,
+    index: true
+  },
   sender: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'

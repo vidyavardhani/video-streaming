@@ -10,15 +10,20 @@ const ensureParticipant = async (classCode, user, joinToken) => {
   }
 
   if (user) {
-    const isHost = klass.host.toString() === user._id.toString();
-    const isParticipant = klass.participants.some((entry) => entry.user?.toString() === user._id.toString());
+    const hostId = klass.host?._id ? klass.host._id.toString() : klass.host?.toString();
+    const isHost = hostId && hostId === user._id.toString();
+    const isParticipant = klass.participants.some(
+      (entry) => entry.user?.toString() === user._id.toString() && !entry.expelledAt
+    );
     if (isHost || isParticipant) {
       return { klass, displayName: user.name, userId: user._id };
     }
   }
 
   if (joinToken) {
-    const participant = klass.participants.find((entry) => entry.token === joinToken);
+    const participant = klass.participants.find(
+      (entry) => entry.token === joinToken && !entry.expelledAt
+    );
     if (participant) {
       return { klass, displayName: participant.displayName, joinToken };
     }
@@ -44,8 +49,10 @@ exports.sendMessage = async (req, res) => {
       return res.status(403).json({ message: error });
     }
 
+    const room = klass.chatRoomId || klass.meetingCode;
     const message = await Chat.create({
       class: klass._id,
+      room,
       sender: userId,
       senderName: displayName,
       message: req.body.message
@@ -66,7 +73,8 @@ exports.history = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    const messages = await Chat.find({ class: klass._id }).sort('createdAt');
+    const room = klass.chatRoomId || klass.meetingCode;
+    const messages = await Chat.find({ class: klass._id, room }).sort('createdAt');
     return res.json(messages);
   } catch (error) {
     console.error('Chat history error', error);
@@ -80,7 +88,8 @@ exports.remove = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!req.user || klass.host.toString() !== req.user._id.toString()) {
+    const hostId = klass.host?._id ? klass.host._id.toString() : klass.host?.toString();
+    if (!req.user || hostId !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Only host can remove messages' });
     }
 

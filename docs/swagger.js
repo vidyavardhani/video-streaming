@@ -114,6 +114,46 @@ module.exports = {
         summary: 'Remove participant'
       }
     },
+    '/classes/{code}/polls': {
+      post: {
+        summary: 'Create a class poll'
+      }
+    },
+    '/classes/{code}/polls/vote': {
+      post: {
+        summary: 'Vote in the active poll'
+      }
+    },
+    '/classes/{code}/polls/close': {
+      post: {
+        summary: 'Close the active poll'
+      }
+    },
+    '/classes/{code}/questions': {
+      post: {
+        summary: 'Submit a Q&A question'
+      }
+    },
+    '/classes/{code}/questions/{questionId}': {
+      patch: {
+        summary: 'Answer a Q&A question'
+      }
+    },
+    '/classes/{code}/whiteboard/clear': {
+      post: {
+        summary: 'Clear whiteboard strokes'
+      }
+    },
+    '/classes/{code}/recording/start': {
+      post: {
+        summary: 'Start server-side recording'
+      }
+    },
+    '/classes/{code}/recording/stop': {
+      post: {
+        summary: 'Stop recording and upload to S3'
+      }
+    },
     '/classes/mine': {
       get: {
         summary: 'List classes for the authenticated teacher'

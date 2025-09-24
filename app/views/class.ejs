@@ -82,6 +82,7 @@
               <div class="stage-overlay">
                 <span id="primary-label">Connecting…</span>
               </div>
+              <canvas id="whiteboard-canvas" class="whiteboard hidden" width="960" height="540"></canvas>
             </div>
             <div id="pip-container" class="stage-pip hidden">
               <video id="pip-video" autoplay muted playsinline></video>
@@ -111,16 +112,92 @@
                 <h3>Participants</h3>
               </header>
               <ul id="participants-list" class="participants"></ul>
+              <div id="raised-hands" class="raised-hands hidden">
+                <h4>Hands raised</h4>
+                <ul id="raised-hands-list"></ul>
+              </div>
             </section>
           </aside>
+        </div>
+        <div id="utility-panel" class="utility-panel hidden">
+          <div class="utility-header">
+            <div>
+              <h3>Class tools</h3>
+              <p>Whiteboard, polls, Q&amp;A &amp; recording</p>
+            </div>
+            <button id="utility-close" class="ghost small">Close</button>
+          </div>
+          <div class="utility-tabs">
+            <button class="utility-tab active" data-tab="whiteboard">Whiteboard</button>
+            <button class="utility-tab" data-tab="polls">Polls</button>
+            <button class="utility-tab" data-tab="qna">Q&amp;A</button>
+            <button class="utility-tab" data-tab="recording">Recording</button>
+          </div>
+          <div class="utility-content">
+            <section class="utility-pane" data-pane="whiteboard">
+              <div class="whiteboard-toolbar">
+                <span>Draw in real-time.</span>
+                <div>
+                  <input type="color" id="whiteboard-color" value="#1e3a8a">
+                  <input type="range" id="whiteboard-size" min="2" max="12" value="4">
+                  <button id="whiteboard-clear" class="ghost small">Clear</button>
+                </div>
+              </div>
+              <div class="whiteboard-info">Host drawings sync live. Students view only.</div>
+            </section>
+            <section class="utility-pane hidden" data-pane="polls">
+              <div id="polls-wrapper">
+                <form id="poll-create-form" class="panel-card hidden">
+                  <label for="poll-question">Question</label>
+                  <input id="poll-question" type="text" placeholder="Ask a question">
+                  <label for="poll-options">Options (one per line)</label>
+                  <textarea id="poll-options" rows="4" placeholder="Option A&#10;Option B"></textarea>
+                  <button type="submit" class="primary small">Launch poll</button>
+                </form>
+                <div id="poll-active" class="panel-card hidden">
+                  <header>
+                    <h4 id="poll-active-question">Poll</h4>
+                    <button id="poll-close" class="ghost small hidden">End poll</button>
+                  </header>
+                  <ul id="poll-options-list"></ul>
+                </div>
+                <div id="poll-history" class="panel-card hidden">
+                  <h4>Previous polls</h4>
+                  <ul id="poll-history-list"></ul>
+                </div>
+              </div>
+            </section>
+            <section class="utility-pane hidden" data-pane="qna">
+              <form id="qna-form" class="panel-card">
+                <label for="qna-input">Ask the host</label>
+                <input id="qna-input" type="text" placeholder="Type your question" autocomplete="off">
+              </form>
+              <div class="panel-card">
+                <h4>Questions</h4>
+                <ul id="qna-list"></ul>
+              </div>
+            </section>
+            <section class="utility-pane hidden" data-pane="recording">
+              <div class="panel-card">
+                <div id="recording-status" class="recording-status">Recording inactive</div>
+                <div class="recording-actions">
+                  <button id="recording-start" class="primary small">Start recording</button>
+                  <button id="recording-stop" class="ghost small">Stop recording</button>
+                </div>
+                <div id="recording-link" class="recording-link hidden"></div>
+              </div>
+            </section>
+          </div>
         </div>
         <footer class="meeting-controls">
           <div id="host-controls" class="control-cluster">
             <button id="live-mic-toggle" class="control-btn" data-icon="🎤">Mic</button>
             <button id="live-camera-toggle" class="control-btn" data-icon="📷">Camera</button>
             <button id="screen-share" class="control-btn" data-icon="🖥">Share</button>
+            <button id="options-toggle" class="control-btn" data-icon="✨">Tools</button>
           </div>
           <div class="control-cluster">
+            <button id="hand-raise-btn" class="control-btn ghost" data-icon="✋">Raise</button>
             <button id="leave-btn" class="control-btn ghost" data-icon="🚪">Leave</button>
             <button id="end-btn" class="control-btn danger ghost hidden" data-icon="⏹">End</button>
           </div>

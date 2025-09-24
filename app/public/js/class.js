@@ -19,7 +19,23 @@
     peers: new Map(),
     videos: new Map(),
     lobby: [],
-    hostMedia: { camera: null, screen: null }
+    hostMedia: { camera: null, screen: null },
+    utilityTab: 'whiteboard',
+    whiteboard: {
+      drawing: false,
+      strokes: [],
+      color: '#1e3a8a',
+      size: 4,
+      lastPoint: null,
+      visible: false
+    },
+    activePoll: null,
+    pollHistory: [],
+    questions: [],
+    recording: { isRecording: false },
+    raisedHands: new Map(),
+    mediaStates: new Map(),
+    handRaised: false
   };
 
   const elements = {
@@ -62,7 +78,35 @@
     hostControls: document.getElementById('host-controls'),
     liveLobbyCard: document.getElementById('live-lobby-card'),
     liveLobbyList: document.getElementById('live-lobby-list'),
-    liveLobbyCount: document.getElementById('live-lobby-count')
+    liveLobbyCount: document.getElementById('live-lobby-count'),
+    whiteboardCanvas: document.getElementById('whiteboard-canvas'),
+    whiteboardClear: document.getElementById('whiteboard-clear'),
+    whiteboardColor: document.getElementById('whiteboard-color'),
+    whiteboardSize: document.getElementById('whiteboard-size'),
+    utilityPanel: document.getElementById('utility-panel'),
+    utilityToggle: document.getElementById('options-toggle'),
+    utilityClose: document.getElementById('utility-close'),
+    utilityTabs: document.querySelectorAll('.utility-tab'),
+    utilityPanes: document.querySelectorAll('.utility-pane'),
+    pollCreateForm: document.getElementById('poll-create-form'),
+    pollQuestion: document.getElementById('poll-question'),
+    pollOptions: document.getElementById('poll-options'),
+    pollActive: document.getElementById('poll-active'),
+    pollActiveQuestion: document.getElementById('poll-active-question'),
+    pollOptionsList: document.getElementById('poll-options-list'),
+    pollClose: document.getElementById('poll-close'),
+    pollHistory: document.getElementById('poll-history'),
+    pollHistoryList: document.getElementById('poll-history-list'),
+    qnaForm: document.getElementById('qna-form'),
+    qnaInput: document.getElementById('qna-input'),
+    qnaList: document.getElementById('qna-list'),
+    recordingStatus: document.getElementById('recording-status'),
+    recordingStart: document.getElementById('recording-start'),
+    recordingStop: document.getElementById('recording-stop'),
+    recordingLink: document.getElementById('recording-link'),
+    handRaiseBtn: document.getElementById('hand-raise-btn'),
+    raisedHands: document.getElementById('raised-hands'),
+    raisedHandsList: document.getElementById('raised-hands-list')
   };
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -90,6 +134,398 @@
       }).format(new Date(value));
     } catch (error) {
       return '—';
+    }
+  };
+
+  const updateParticipantState = (token, payload) => {
+    if (!state.classInfo || !Array.isArray(state.classInfo.participants)) return;
+    const index = state.classInfo.participants.findIndex((item) => item.token === token);
+    if (index !== -1) {
+      state.classInfo.participants[index] = {
+        ...state.classInfo.participants[index],
+        ...payload
+      };
+    }
+  };
+
+  const renderWhiteboard = () => {
+    if (!elements.whiteboardCanvas) return;
+    const canvas = elements.whiteboardCanvas;
+    const ctx = canvas.getContext('2d');
+    const displayWidth = canvas.clientWidth;
+    const displayHeight = canvas.clientHeight;
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+    }
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+
+    const strokes = [...(state.whiteboard.strokes || [])];
+    if (state.whiteboard.currentStroke) {
+      strokes.push(state.whiteboard.currentStroke);
+    }
+
+    strokes.forEach((stroke) => {
+      const points = Array.isArray(stroke.path) ? stroke.path : [];
+      if (points.length < 2) return;
+      ctx.strokeStyle = stroke.color || '#1f2937';
+      ctx.lineWidth = stroke.size || 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      points.forEach((point, idx) => {
+        const x = (point.x || 0) * width;
+        const y = (point.y || 0) * height;
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+
+    const shouldShow = state.whiteboard.visible || state.whiteboard.strokes.length > 0;
+    canvas.classList.toggle('hidden', !shouldShow);
+  };
+
+  const updateRecordingStatus = () => {
+    if (!elements.recordingStatus) return;
+    const isRecording = !!state.recording?.isRecording;
+    elements.recordingStatus.textContent = isRecording ? 'Recording in progress…' : 'Recording inactive';
+    elements.recordingStatus.classList.toggle('active', isRecording);
+    if (elements.recordingStart) {
+      elements.recordingStart.classList.toggle('hidden', !state.isHost || isRecording);
+    }
+    if (elements.recordingStop) {
+      elements.recordingStop.classList.toggle('hidden', !state.isHost || !isRecording);
+    }
+    if (elements.recordingLink) {
+      const link = state.classInfo?.recordedVideoLink;
+      if (link) {
+        elements.recordingLink.classList.remove('hidden');
+        elements.recordingLink.innerHTML = `<a href="${link}" target="_blank" rel="noopener">Download recording</a>`;
+      } else {
+        elements.recordingLink.classList.add('hidden');
+        elements.recordingLink.textContent = '';
+      }
+    }
+  };
+
+  const renderPolls = () => {
+    if (!elements.pollCreateForm || !elements.pollActive) return;
+    const hasActive = !!state.activePoll;
+    elements.pollCreateForm.classList.toggle('hidden', !state.isHost || hasActive);
+    elements.pollActive.classList.toggle('hidden', !hasActive);
+    if (elements.pollClose) {
+      elements.pollClose.classList.toggle('hidden', !state.isHost || !hasActive);
+    }
+
+    if (hasActive) {
+      elements.pollActiveQuestion.textContent = state.activePoll.question;
+      const totalVotes = state.activePoll.responses?.length || 0;
+      const currentVote = state.activePoll.responses?.find((resp) => resp.participantToken === state.joinToken);
+      elements.pollOptionsList.innerHTML = '';
+      state.activePoll.options.forEach((option) => {
+        const li = document.createElement('li');
+        li.className = 'poll-option';
+
+        const header = document.createElement('div');
+        header.className = 'poll-option-header';
+        const label = document.createElement('span');
+        label.textContent = option.label;
+        const percent = totalVotes ? Math.round((option.votes / totalVotes) * 100) : 0;
+        const meta = document.createElement('span');
+        meta.className = 'poll-option-meta';
+        meta.textContent = `${option.votes} · ${percent}%`;
+        header.appendChild(label);
+        header.appendChild(meta);
+
+        const bar = document.createElement('div');
+        bar.className = 'poll-option-bar';
+        const fill = document.createElement('div');
+        fill.style.width = `${percent}%`;
+        bar.appendChild(fill);
+
+        li.appendChild(header);
+        li.appendChild(bar);
+
+        if (!state.isHost && state.admitted) {
+          const voteButton = document.createElement('button');
+          voteButton.type = 'button';
+          voteButton.className = 'ghost small';
+          const voted = currentVote && currentVote.optionId === option.id;
+          voteButton.textContent = voted ? 'Voted' : 'Vote';
+          if (voted) {
+            voteButton.classList.add('primary');
+          }
+          voteButton.addEventListener('click', () => submitPollVote(option.id));
+          li.appendChild(voteButton);
+        }
+
+        elements.pollOptionsList.appendChild(li);
+      });
+    }
+
+    if (elements.pollHistory && elements.pollHistoryList) {
+      const history = state.pollHistory || [];
+      elements.pollHistory.classList.toggle('hidden', history.length === 0);
+      elements.pollHistoryList.innerHTML = '';
+      history.slice().reverse().forEach((poll) => {
+        const item = document.createElement('li');
+        item.className = 'poll-history-item';
+        const title = document.createElement('strong');
+        title.textContent = poll.question;
+        item.appendChild(title);
+        const detail = document.createElement('div');
+        detail.className = 'poll-history-options';
+        poll.options.forEach((opt) => {
+          const span = document.createElement('span');
+          span.textContent = `${opt.label} (${opt.votes})`;
+          detail.appendChild(span);
+        });
+        item.appendChild(detail);
+        elements.pollHistoryList.appendChild(item);
+      });
+    }
+  };
+
+  const renderQna = () => {
+    if (!elements.qnaList) return;
+    elements.qnaList.innerHTML = '';
+    (state.questions || []).slice().reverse().forEach((entry) => {
+      const li = document.createElement('li');
+      li.className = 'qna-item';
+      const questionText = document.createElement('p');
+      questionText.className = 'qna-question';
+      questionText.textContent = entry.question;
+      const meta = document.createElement('span');
+      meta.className = 'qna-meta';
+      meta.textContent = `Asked by ${entry.askedByName || 'Participant'} · ${formatTime(entry.askedAt)}`;
+      li.appendChild(questionText);
+      li.appendChild(meta);
+
+      if (entry.answer) {
+        const answer = document.createElement('div');
+        answer.className = 'qna-answer';
+        answer.innerHTML = `<strong>Host:</strong> ${entry.answer}`;
+        li.appendChild(answer);
+      } else if (state.isHost) {
+        const answerBtn = document.createElement('button');
+        answerBtn.type = 'button';
+        answerBtn.className = 'ghost small';
+        answerBtn.textContent = 'Answer';
+        answerBtn.addEventListener('click', () => promptAnswer(entry));
+        li.appendChild(answerBtn);
+      }
+
+      elements.qnaList.appendChild(li);
+    });
+  };
+
+  const updateRaisedHandsDisplay = () => {
+    if (!elements.raisedHands || !elements.raisedHandsList) return;
+    const entries = Array.from(state.raisedHands.values()).sort((a, b) => new Date(a.handRaisedAt || 0) - new Date(b.handRaisedAt || 0));
+    elements.raisedHands.classList.toggle('hidden', entries.length === 0);
+    elements.raisedHandsList.innerHTML = '';
+    entries.forEach((entry) => {
+      const li = document.createElement('li');
+      li.textContent = `${entry.displayName} · ${formatTime(entry.handRaisedAt)}`;
+      if (state.isHost) {
+        const controls = document.createElement('div');
+        controls.className = 'hand-controls';
+        const allowBtn = document.createElement('button');
+        allowBtn.type = 'button';
+        allowBtn.className = 'ghost small';
+        allowBtn.textContent = 'Allow';
+        allowBtn.addEventListener('click', () => allowParticipant(entry.token));
+        const lowerBtn = document.createElement('button');
+        lowerBtn.type = 'button';
+        lowerBtn.className = 'ghost small';
+        lowerBtn.textContent = 'Lower';
+        lowerBtn.addEventListener('click', () => lowerHand(entry.token));
+        controls.appendChild(allowBtn);
+        controls.appendChild(lowerBtn);
+        li.appendChild(controls);
+      }
+      elements.raisedHandsList.appendChild(li);
+    });
+  };
+
+  const submitPollVote = async (optionId) => {
+    try {
+      const res = await fetch(`/classes/${classCode}/polls/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ optionId, joinToken: state.joinToken })
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        alert(error.message || 'Unable to submit vote');
+      }
+    } catch (error) {
+      console.error('submitPollVote error', error);
+    }
+  };
+
+  const promptAnswer = (question) => {
+    const answer = window.prompt('Answer question', question.answer || '');
+    if (!answer) return;
+    fetch(`/classes/${classCode}/questions/${question.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer })
+    });
+  };
+
+  const allowParticipant = (token) => {
+    if (!state.socket) return;
+    state.socket.emit('hand:allow', { targetToken: token }, (response) => {
+      if (response?.error) {
+        console.error(response.error);
+      }
+    });
+  };
+
+  const lowerHand = (token) => {
+    if (!state.socket) return;
+    state.socket.emit('hand:lower', { targetToken: token }, (response) => {
+      if (response?.error) {
+        console.error(response.error);
+      }
+    });
+  };
+
+  const sendMediaControl = (token, updates) => {
+    if (!state.socket) return;
+    state.socket.emit('media:control', { targetToken: token, ...updates }, (response) => {
+      if (response?.error) {
+        console.error(response.error);
+      }
+    });
+  };
+
+  const applyMediaState = (token, mediaState = {}) => {
+    state.mediaStates.set(token, {
+      audio: mediaState.audio !== false,
+      video: mediaState.video !== false
+    });
+  };
+
+  const getMediaState = (token) => state.mediaStates.get(token) || { audio: true, video: true };
+
+  const setUtilityTab = (tab) => {
+    state.utilityTab = tab;
+    state.whiteboard.visible = tab === 'whiteboard';
+    if (elements.utilityTabs) {
+      elements.utilityTabs.forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+      });
+    }
+    if (elements.utilityPanes) {
+      elements.utilityPanes.forEach((pane) => {
+        pane.classList.toggle('hidden', pane.dataset.pane !== tab);
+      });
+    }
+    if (elements.whiteboardCanvas) {
+      elements.whiteboardCanvas.classList.toggle('interactive', state.isHost && tab === 'whiteboard');
+    }
+    if (tab === 'whiteboard') {
+      renderWhiteboard();
+    }
+  };
+
+  const toggleUtilityPanel = (open) => {
+    if (!elements.utilityPanel) return;
+    const shouldOpen = typeof open === 'boolean' ? open : !elements.utilityPanel.classList.contains('visible');
+    elements.utilityPanel.classList.toggle('visible', shouldOpen);
+    elements.utilityPanel.classList.toggle('hidden', !shouldOpen);
+    if (shouldOpen) {
+      setUtilityTab(state.utilityTab || 'whiteboard');
+    } else {
+      state.whiteboard.visible = false;
+      renderWhiteboard();
+    }
+  };
+
+  const updateHandRaiseButton = () => {
+    if (!elements.handRaiseBtn) return;
+    elements.handRaiseBtn.classList.toggle('hidden', state.isHost);
+    if (state.isHost) return;
+    elements.handRaiseBtn.disabled = !state.admitted;
+    elements.handRaiseBtn.textContent = state.handRaised ? 'Lower hand' : 'Raise hand';
+  };
+
+  const toggleHandRaise = () => {
+    if (!elements.handRaiseBtn || state.isHost || !state.socket) return;
+    if (state.handRaised) {
+      state.socket.emit('hand:lower', {}, (response) => {
+        if (response?.error) {
+          console.error(response.error);
+          return;
+        }
+        state.handRaised = false;
+        updateHandRaiseButton();
+      });
+    } else {
+      state.socket.emit('hand:raise', {}, (response) => {
+        if (response?.error) {
+          console.error(response.error);
+          return;
+        }
+        state.handRaised = true;
+        updateHandRaiseButton();
+      });
+    }
+  };
+
+  const getCanvasPoint = (event) => {
+    if (!elements.whiteboardCanvas) return null;
+    const rect = elements.whiteboardCanvas.getBoundingClientRect();
+    const x = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+    const y = Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1);
+    return { x, y };
+  };
+
+  const startStroke = (event) => {
+    if (!state.isHost || !elements.whiteboardCanvas) return;
+    event.preventDefault();
+    const point = getCanvasPoint(event);
+    if (!point) return;
+    state.whiteboard.drawing = true;
+    state.whiteboard.currentStroke = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      path: [point],
+      color: state.whiteboard.color,
+      size: state.whiteboard.size
+    };
+    renderWhiteboard();
+  };
+
+  const extendStroke = (event) => {
+    if (!state.whiteboard.drawing || !state.whiteboard.currentStroke) return;
+    const point = getCanvasPoint(event);
+    if (!point) return;
+    state.whiteboard.currentStroke.path.push(point);
+    renderWhiteboard();
+  };
+
+  const finishStroke = () => {
+    if (!state.whiteboard.drawing || !state.whiteboard.currentStroke) return;
+    state.whiteboard.drawing = false;
+    const stroke = state.whiteboard.currentStroke;
+    state.whiteboard.currentStroke = null;
+    if (stroke.path.length < 2) {
+      renderWhiteboard();
+      return;
+    }
+    state.whiteboard.strokes.push(stroke);
+    renderWhiteboard();
+    if (state.socket) {
+      state.socket.emit('whiteboard:stroke', stroke, (response) => {
+        if (response?.error) {
+          console.error(response.error);
+        }
+      });
     }
   };
 
@@ -182,16 +618,98 @@
     if (!elements.participantsList || !state.classInfo) return;
     const participants = state.classInfo.participants || [];
     elements.participantsList.innerHTML = '';
+
+    const buildMediaBadge = (icon, active) => {
+      const span = document.createElement('span');
+      span.className = `media-chip ${active ? 'on' : 'off'}`;
+      span.textContent = icon;
+      return span;
+    };
+
     if (state.classInfo.host) {
       const hostItem = document.createElement('li');
-      hostItem.textContent = `${state.classInfo.host.name} (Host)`;
+      hostItem.className = 'participant host';
+      const name = document.createElement('div');
+      name.className = 'identity';
+      name.innerHTML = `<strong>${state.classInfo.host.name}</strong><span class="role">Host</span>`;
+      hostItem.appendChild(name);
       elements.participantsList.appendChild(hostItem);
     }
-    participants.forEach((p) => {
+
+    const raisedMap = new Map();
+
+    participants.forEach((participant) => {
       const li = document.createElement('li');
-      li.textContent = p.displayName;
+      li.className = 'participant';
+      const identity = document.createElement('div');
+      identity.className = 'identity';
+      const strong = document.createElement('strong');
+      strong.textContent = participant.displayName;
+      identity.appendChild(strong);
+      li.appendChild(identity);
+
+      const mediaState = participant.mediaState || getMediaState(participant.token);
+      applyMediaState(participant.token, mediaState);
+
+      const status = document.createElement('div');
+      status.className = 'participant-status';
+      status.appendChild(buildMediaBadge('🎤', mediaState.audio !== false));
+      status.appendChild(buildMediaBadge('📷', mediaState.video !== false));
+      if (participant.handRaisedAt) {
+        const hand = document.createElement('span');
+        hand.className = 'hand-raised';
+        hand.textContent = '✋';
+        status.appendChild(hand);
+        raisedMap.set(participant.token, {
+          token: participant.token,
+          displayName: participant.displayName,
+          handRaisedAt: participant.handRaisedAt
+        });
+      }
+      if (participant.allowedToSpeakAt) {
+        const granted = document.createElement('span');
+        granted.className = 'hand-allowed';
+        granted.textContent = '🎙';
+        status.appendChild(granted);
+      }
+      li.appendChild(status);
+
+      if (state.isHost) {
+        const actions = document.createElement('div');
+        actions.className = 'participant-actions';
+
+        const toggleAudio = document.createElement('button');
+        toggleAudio.type = 'button';
+        toggleAudio.className = 'ghost small';
+        toggleAudio.textContent = mediaState.audio === false ? 'Unmute' : 'Mute';
+        toggleAudio.addEventListener('click', () => sendMediaControl(participant.token, { audio: mediaState.audio === false }));
+
+        const toggleVideo = document.createElement('button');
+        toggleVideo.type = 'button';
+        toggleVideo.className = 'ghost small';
+        toggleVideo.textContent = mediaState.video === false ? 'Show video' : 'Hide video';
+        toggleVideo.addEventListener('click', () => sendMediaControl(participant.token, { video: mediaState.video === false }));
+
+        actions.appendChild(toggleAudio);
+        actions.appendChild(toggleVideo);
+
+        if (participant.handRaisedAt) {
+          const allow = document.createElement('button');
+          allow.type = 'button';
+          allow.className = 'ghost small';
+          allow.textContent = 'Allow';
+          allow.addEventListener('click', () => allowParticipant(participant.token));
+          actions.appendChild(allow);
+        }
+
+        li.appendChild(actions);
+      }
+
       elements.participantsList.appendChild(li);
     });
+
+    state.raisedHands = raisedMap;
+    updateRaisedHandsDisplay();
   };
 
   const ensureParticipantTile = (id, label) => {
@@ -418,8 +936,23 @@
     const res = await fetch(`/classes/${classCode}`);
     if (!res.ok) throw new Error('Failed to load class');
     state.classInfo = await res.json();
+    state.whiteboard.strokes = (state.classInfo.whiteboard?.strokes || []).map((stroke) => ({
+      ...stroke,
+      path: Array.isArray(stroke.path) ? stroke.path : []
+    }));
+    state.activePoll = state.classInfo.activePoll || null;
+    state.pollHistory = state.classInfo.pollHistory || [];
+    state.questions = state.classInfo.questions || [];
+    state.recording = state.classInfo.recording || { isRecording: false };
+    (state.classInfo.participants || []).forEach((participant) => {
+      applyMediaState(participant.token, participant.mediaState);
+    });
     updateMeetingMeta();
     renderParticipants();
+    renderWhiteboard();
+    renderPolls();
+    renderQna();
+    updateRecordingStatus();
     refreshStage();
   };
 
@@ -466,6 +999,7 @@
           elements.endButton.classList.toggle('hidden', !state.isHost);
         }
         refreshStage();
+        updateHandRaiseButton();
         state.admitted = response.role === 'participant' && state.classInfo?.status === 'live';
         if (response.classStatus === 'ended') {
           setView('endedView');
@@ -483,6 +1017,7 @@
           setView('liveView');
           beginCall();
         }
+        emitMediaUpdate();
         }
       );
     });
@@ -499,21 +1034,28 @@
         state.classInfo.participants = state.classInfo.participants || [];
         if (!state.classInfo.participants.some((p) => p.token === participant.token)) {
           state.classInfo.participants.push(participant);
+          applyMediaState(participant.token, participant.mediaState);
           renderParticipants();
         }
         setView('liveView');
         beginCall();
         elements.waitingMessage.textContent = 'Joining the class…';
+        state.handRaised = false;
+        updateHandRaiseButton();
       }
     });
 
     state.socket.on('participant:joined', ({ participant }) => {
       if (!participant?.token) return;
       state.classInfo.participants = state.classInfo.participants || [];
-      if (!state.classInfo.participants.some((p) => p.token === participant.token)) {
+      const existing = state.classInfo.participants.find((p) => p.token === participant.token);
+      if (existing) {
+        Object.assign(existing, participant);
+      } else {
         state.classInfo.participants.push(participant);
-        renderParticipants();
       }
+      applyMediaState(participant.token, participant.mediaState);
+      renderParticipants();
       if (state.isHost) {
         createPeerConnection(participant.token, true);
       }
@@ -527,6 +1069,8 @@
         elements.waitingMessage.textContent = 'Removed by host';
         sessionStorage.removeItem(joinKey);
         state.joinToken = null;
+        state.handRaised = false;
+        updateHandRaiseButton();
         if (!state.isHost && state.socket) {
           state.socket.disconnect();
           state.socket = null;
@@ -537,6 +1081,8 @@
         state.classInfo.participants = state.classInfo.participants.filter((p) => p.token !== joinToken);
         renderParticipants();
       }
+      state.raisedHands.delete(joinToken);
+      updateRaisedHandsDisplay();
       if (state.isHost) {
         state.lobby = state.lobby.filter((entry) => entry.token !== joinToken);
         renderLobby();
@@ -551,6 +1097,8 @@
         state.classInfo.participants = state.classInfo.participants.filter((p) => p.token !== joinToken);
         renderParticipants();
       }
+      state.raisedHands.delete(joinToken);
+      updateRaisedHandsDisplay();
       removeVideoEl(joinToken);
       state.peers.delete(joinToken);
       state.screenSenders = state.screenSenders.filter(({ token }) => token !== joinToken);
@@ -573,6 +1121,9 @@
       setView('endedView');
       sessionStorage.removeItem(joinKey);
       state.joinToken = null;
+      state.admitted = false;
+      state.handRaised = false;
+      updateHandRaiseButton();
       if (!state.isHost && state.socket) {
         state.socket.disconnect();
         state.socket = null;
@@ -583,6 +1134,119 @@
     state.socket.on('chat:remove', ({ msgId }) => {
       const el = elements.chatMessages.querySelector(`[data-id="${msgId}"]`);
       if (el) el.remove();
+    });
+
+    state.socket.on('participant:media', ({ joinToken, mediaState }) => {
+      applyMediaState(joinToken, mediaState);
+      updateParticipantState(joinToken, { mediaState });
+      renderParticipants();
+    });
+
+    state.socket.on('hand:raised', ({ joinToken, name, handRaisedAt }) => {
+      updateParticipantState(joinToken, { handRaisedAt });
+      state.raisedHands.set(joinToken, { token: joinToken, displayName: name, handRaisedAt });
+      renderParticipants();
+      if (joinToken === state.joinToken) {
+        state.handRaised = true;
+        updateHandRaiseButton();
+      }
+    });
+
+    state.socket.on('hand:lowered', ({ joinToken }) => {
+      updateParticipantState(joinToken, { handRaisedAt: null });
+      state.raisedHands.delete(joinToken);
+      renderParticipants();
+      if (joinToken === state.joinToken) {
+        state.handRaised = false;
+        updateHandRaiseButton();
+      }
+    });
+
+    state.socket.on('hand:allowed', ({ joinToken }) => {
+      updateParticipantState(joinToken, { handRaisedAt: null, allowedToSpeakAt: new Date().toISOString() });
+      state.raisedHands.delete(joinToken);
+      renderParticipants();
+      if (joinToken === state.joinToken) {
+        state.handRaised = false;
+        updateHandRaiseButton();
+      }
+    });
+
+    state.socket.on('host:allow-speak', () => {
+      state.handRaised = false;
+      updateHandRaiseButton();
+      applyHostMediaState({ audio: true });
+      alert('The host allowed you to speak. Your microphone is enabled.');
+    });
+
+    state.socket.on('host:media', (mediaState) => {
+      applyHostMediaState(mediaState);
+    });
+
+    state.socket.on('whiteboard:stroke', (stroke) => {
+      if (!stroke?.id) return;
+      if (!state.whiteboard.strokes.some((existing) => existing.id === stroke.id)) {
+        state.whiteboard.strokes.push({
+          ...stroke,
+          path: Array.isArray(stroke.path) ? stroke.path : []
+        });
+      }
+      if (state.whiteboard.strokes.length > 500) {
+        state.whiteboard.strokes.shift();
+      }
+      renderWhiteboard();
+    });
+
+    state.socket.on('whiteboard:clear', () => {
+      state.whiteboard.strokes = [];
+      renderWhiteboard();
+    });
+
+    state.socket.on('poll:created', (poll) => {
+      state.activePoll = poll;
+      renderPolls();
+    });
+
+    state.socket.on('poll:voted', ({ pollId, responses, options }) => {
+      if (!state.activePoll || state.activePoll.id !== pollId) return;
+      state.activePoll.responses = responses;
+      state.activePoll.options = options;
+      renderPolls();
+    });
+
+    state.socket.on('poll:closed', (poll) => {
+      state.pollHistory = state.pollHistory || [];
+      if (!state.pollHistory.some((item) => item.id === poll.id)) {
+        state.pollHistory.push(poll);
+      }
+      state.activePoll = null;
+      renderPolls();
+    });
+
+    state.socket.on('qna:new', (entry) => {
+      state.questions = state.questions || [];
+      state.questions.push(entry);
+      renderQna();
+    });
+
+    state.socket.on('qna:answered', (entry) => {
+      const index = (state.questions || []).findIndex((item) => item.id === entry.id);
+      if (index !== -1) {
+        state.questions[index] = entry;
+      } else {
+        state.questions.push(entry);
+      }
+      renderQna();
+    });
+
+    state.socket.on('recording:status', (payload) => {
+      const recording = payload?.recording || payload;
+      state.recording = recording;
+      state.classInfo.recording = recording;
+      if (payload?.recordedVideoLink) {
+        state.classInfo.recordedVideoLink = payload.recordedVideoLink;
+      }
+      updateRecordingStatus();
     });
 
     state.socket.on('webrtc:signal', handleSignal);
@@ -872,6 +1536,126 @@
     setTimeout(() => (e.currentTarget.textContent = 'Copy invite'), 1500);
   });
 
+  elements.utilityToggle?.addEventListener('click', () => toggleUtilityPanel());
+  elements.utilityClose?.addEventListener('click', () => toggleUtilityPanel(false));
+  elements.utilityTabs?.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab || 'whiteboard';
+      setUtilityTab(target);
+    });
+  });
+
+  elements.whiteboardColor?.addEventListener('input', (event) => {
+    state.whiteboard.color = event.target.value;
+    if (state.whiteboard.currentStroke) {
+      state.whiteboard.currentStroke.color = state.whiteboard.color;
+    }
+  });
+  elements.whiteboardSize?.addEventListener('input', (event) => {
+    const value = Number(event.target.value) || 4;
+    state.whiteboard.size = value;
+    if (state.whiteboard.currentStroke) {
+      state.whiteboard.currentStroke.size = value;
+    }
+  });
+
+  elements.whiteboardClear?.addEventListener('click', () => {
+    if (!state.isHost) return;
+    state.whiteboard.strokes = [];
+    renderWhiteboard();
+    if (state.socket) {
+      state.socket.emit('whiteboard:clear');
+    }
+  });
+
+  if (elements.whiteboardCanvas) {
+    elements.whiteboardCanvas.addEventListener('pointerdown', startStroke);
+    elements.whiteboardCanvas.addEventListener('pointermove', extendStroke);
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach((eventName) => {
+      elements.whiteboardCanvas.addEventListener(eventName, finishStroke);
+    });
+    document.addEventListener('pointerup', finishStroke);
+  }
+
+  elements.pollCreateForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!state.isHost) return;
+    const question = elements.pollQuestion.value.trim();
+    const options = elements.pollOptions.value
+      .split('\n')
+      .map((opt) => opt.trim())
+      .filter(Boolean);
+    if (!question || options.length < 2) {
+      alert('Provide a question and at least two options');
+      return;
+    }
+    const res = await fetch(`/classes/${classCode}/polls`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, options })
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      alert(error.message || 'Unable to create poll');
+      return;
+    }
+    elements.pollQuestion.value = '';
+    elements.pollOptions.value = '';
+  });
+
+  elements.pollClose?.addEventListener('click', async () => {
+    if (!state.isHost) return;
+    await fetch(`/classes/${classCode}/polls/close`, { method: 'POST' });
+  });
+
+  elements.qnaForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const question = elements.qnaInput.value.trim();
+    if (!question) return;
+    const res = await fetch(`/classes/${classCode}/questions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, joinToken: state.joinToken })
+    });
+    if (res.ok) {
+      elements.qnaInput.value = '';
+    }
+  });
+
+  elements.recordingStart?.addEventListener('click', async () => {
+    if (!state.isHost) return;
+    const res = await fetch(`/classes/${classCode}/recording/start`, { method: 'POST' });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      alert(error.message || 'Unable to start recording');
+      return;
+    }
+    const data = await res.json();
+    state.recording = data;
+    state.classInfo.recording = data;
+    state.classInfo.recordedVideoLink = null;
+    updateRecordingStatus();
+  });
+
+  elements.recordingStop?.addEventListener('click', async () => {
+    if (!state.isHost) return;
+    const res = await fetch(`/classes/${classCode}/recording/stop`, { method: 'POST' });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      alert(error.message || 'Unable to stop recording');
+      return;
+    }
+    const data = await res.json();
+    state.recording = data.recording;
+    state.classInfo.recording = data.recording;
+    if (data.recordedVideoLink) {
+      state.classInfo.recordedVideoLink = data.recordedVideoLink;
+    }
+    updateRecordingStatus();
+  });
+
+  elements.handRaiseBtn?.addEventListener('click', toggleHandRaise);
+
   elements.chatForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = elements.chatInput.value.trim();
@@ -902,6 +1686,30 @@
     setToggleState(elements.liveCameraToggle, 'Camera on', 'Camera off', videoEnabled);
   };
 
+  const emitMediaUpdate = () => {
+    if (!state.socket || !state.localStream) return;
+    const audioEnabled = !!state.localStream.getAudioTracks().some((track) => track.enabled);
+    const videoEnabled = !!state.localStream.getVideoTracks().some((track) => track.enabled);
+    state.socket.emit('media:update', { audio: audioEnabled, video: videoEnabled });
+  };
+
+  const applyHostMediaState = (media) => {
+    if (!state.localStream || !media) return;
+    if (typeof media.audio === 'boolean') {
+      state.localStream.getAudioTracks().forEach((track) => {
+        track.enabled = media.audio;
+      });
+    }
+    if (typeof media.video === 'boolean') {
+      state.localStream.getVideoTracks().forEach((track) => {
+        track.enabled = media.video;
+      });
+      refreshStage();
+    }
+    syncTrackButtons();
+    emitMediaUpdate();
+  };
+
   const toggleTrack = (kind) => {
     if (!state.localStream) return;
     state.localStream.getTracks().forEach((track) => {
@@ -913,6 +1721,7 @@
       refreshStage();
     }
     syncTrackButtons();
+    emitMediaUpdate();
   };
 
   const stopScreenShare = () => {
@@ -976,6 +1785,7 @@
     await setupPreview();
     bindTrackToggles();
     state.lobby = state.classInfo.lobby || [];
+    updateHandRaiseButton();
     if (elements.endButton) {
       elements.endButton.classList.toggle('hidden', !state.isHost);
     }
