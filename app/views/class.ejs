@@ -66,11 +66,19 @@
     <section id="live-view" class="hidden">
       <div class="meeting-shell">
         <header class="meeting-header">
-          <div>
+          <div class="meeting-heading">
             <h2 id="live-meeting-title">Live class</h2>
             <p>Code <span id="live-meeting-code" class="mono">—</span></p>
           </div>
           <div class="header-meta">
+            <button id="toggle-chat" class="icon-btn" aria-pressed="false" title="Toggle chat">
+              <span aria-hidden="true">💬</span>
+              <span class="label">Chat</span>
+            </button>
+            <button id="toggle-participants" class="icon-btn" aria-pressed="false" title="Toggle participants">
+              <span aria-hidden="true">👥</span>
+              <span class="label">Participants</span>
+            </button>
             <button class="ghost" id="share-info">Copy invite</button>
             <span class="status-dot live">Live</span>
           </div>
@@ -90,35 +98,36 @@
             </div>
             <div id="participant-strip" class="participant-strip"></div>
           </div>
-          <aside class="meeting-sidebar">
-            <section id="live-lobby-card" class="lobby-card hidden">
-              <header>
-                <h3>Waiting to join</h3>
-                <span id="live-lobby-count" class="badge">0</span>
-              </header>
-              <ul id="live-lobby-list"></ul>
-            </section>
-            <section class="chat-panel">
-              <header>
-                <h3>Chat</h3>
-              </header>
-              <div id="chat-messages" class="chat-messages"></div>
-              <form id="chat-form" class="chat-form">
-                <input id="chat-text" type="text" placeholder="Send a message" autocomplete="off">
-              </form>
-            </section>
-            <section class="participants-card">
-              <header>
-                <h3>Participants</h3>
-              </header>
-              <ul id="participants-list" class="participants"></ul>
-              <div id="raised-hands" class="raised-hands hidden">
-                <h4>Hands raised</h4>
-                <ul id="raised-hands-list"></ul>
-              </div>
-            </section>
-          </aside>
         </div>
+        <div id="chat-drawer" class="side-drawer hidden" aria-hidden="true">
+          <div class="drawer-header">
+            <h3>Chat</h3>
+            <button id="chat-close" class="ghost small" type="button">Close</button>
+          </div>
+          <div id="chat-messages" class="chat-messages"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-text" type="text" placeholder="Send a message" autocomplete="off">
+          </form>
+        </div>
+        <div id="participants-drawer" class="side-drawer hidden" aria-hidden="true">
+          <div class="drawer-header">
+            <h3>Participants</h3>
+            <button id="participants-close" class="ghost small" type="button">Close</button>
+          </div>
+          <section id="live-lobby-card" class="lobby-card hidden">
+            <header>
+              <h4>Waiting to join</h4>
+              <span id="live-lobby-count" class="badge">0</span>
+            </header>
+            <ul id="live-lobby-list"></ul>
+          </section>
+          <ul id="participants-list" class="participants"></ul>
+          <div id="raised-hands" class="raised-hands hidden">
+            <h4>Hands raised</h4>
+            <ul id="raised-hands-list"></ul>
+          </div>
+        </div>
+        <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
         <div id="utility-panel" class="utility-panel hidden">
           <div class="utility-header">
             <div>

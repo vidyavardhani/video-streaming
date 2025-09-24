@@ -20,6 +20,7 @@
     videos: new Map(),
     lobby: [],
     hostMedia: { camera: null, screen: null },
+    activeDrawer: null,
     utilityTab: 'whiteboard',
     whiteboard: {
       drawing: false,
@@ -79,6 +80,13 @@
     liveLobbyCard: document.getElementById('live-lobby-card'),
     liveLobbyList: document.getElementById('live-lobby-list'),
     liveLobbyCount: document.getElementById('live-lobby-count'),
+    chatToggle: document.getElementById('toggle-chat'),
+    participantsToggle: document.getElementById('toggle-participants'),
+    chatClose: document.getElementById('chat-close'),
+    participantsClose: document.getElementById('participants-close'),
+    chatDrawer: document.getElementById('chat-drawer'),
+    participantsDrawer: document.getElementById('participants-drawer'),
+    drawerBackdrop: document.getElementById('drawer-backdrop'),
     whiteboardCanvas: document.getElementById('whiteboard-canvas'),
     whiteboardClear: document.getElementById('whiteboard-clear'),
     whiteboardColor: document.getElementById('whiteboard-color'),
@@ -186,6 +194,48 @@
 
     const shouldShow = state.whiteboard.visible || state.whiteboard.strokes.length > 0;
     canvas.classList.toggle('hidden', !shouldShow);
+  };
+
+  const syncDrawerState = () => {
+    const map = {
+      chat: elements.chatDrawer,
+      participants: elements.participantsDrawer
+    };
+    Object.entries(map).forEach(([name, drawer]) => {
+      if (!drawer) return;
+      const isOpen = state.activeDrawer === name;
+      drawer.classList.toggle('open', isOpen);
+      drawer.classList.toggle('hidden', !isOpen);
+      drawer.setAttribute('aria-hidden', (!isOpen).toString());
+    });
+    const showBackdrop = !!state.activeDrawer;
+    if (elements.drawerBackdrop) {
+      elements.drawerBackdrop.classList.toggle('hidden', !showBackdrop);
+    }
+    if (elements.chatToggle) {
+      elements.chatToggle.setAttribute('aria-pressed', (state.activeDrawer === 'chat').toString());
+    }
+    if (elements.participantsToggle) {
+      elements.participantsToggle.setAttribute('aria-pressed', (state.activeDrawer === 'participants').toString());
+    }
+  };
+
+  const openDrawer = (name) => {
+    state.activeDrawer = name;
+    syncDrawerState();
+  };
+
+  const closeDrawer = () => {
+    state.activeDrawer = null;
+    syncDrawerState();
+  };
+
+  const toggleDrawer = (name) => {
+    if (state.activeDrawer === name) {
+      closeDrawer();
+    } else {
+      openDrawer(name);
+    }
   };
 
   const updateRecordingStatus = () => {
@@ -745,6 +795,14 @@
 
   const setVideoSource = (video, stream, muted = false) => {
     if (!video) return;
+    if (!stream) {
+      if ('srcObject' in video) {
+        video.srcObject = null;
+      } else {
+        video.src = '';
+      }
+      return;
+    }
     if ('srcObject' in video) {
       if (video.srcObject !== stream) {
         video.srcObject = stream;
@@ -753,6 +811,10 @@
       video.src = window.URL.createObjectURL(stream);
     }
     video.muted = muted;
+    const playPromise = typeof video.play === 'function' ? video.play() : null;
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {});
+    }
   };
 
   const updatePrimaryStream = (stream, label, muted = false) => {
@@ -1272,6 +1334,8 @@
     state.videos = new Map();
     stopScreenShare();
     state.hostMedia = { camera: null, screen: null };
+    state.activeDrawer = null;
+    syncDrawerState();
     refreshStage();
   };
 
@@ -1304,13 +1368,30 @@
 
     pc.ontrack = (event) => {
       const [stream] = event.streams;
+      if (!stream) return;
       attachStream(targetToken, stream, getNameByToken(targetToken));
+      if (event.track && typeof event.track.addEventListener === 'function') {
+        event.track.addEventListener('ended', () => {
+          if (targetToken === 'host' && !state.isHost) {
+            if (detectScreenTrack(stream)) {
+              state.hostMedia.screen = null;
+            } else {
+              state.hostMedia.camera = null;
+            }
+            refreshStage();
+          }
+        });
+      }
     };
 
     pc.onconnectionstatechange = () => {
-      if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+      if (['failed', 'closed'].includes(pc.connectionState)) {
         removeVideoEl(targetToken);
         state.peers.delete(targetToken);
+        if (targetToken === 'host' && !state.isHost) {
+          state.hostMedia = { camera: null, screen: null };
+          refreshStage();
+        }
       }
     };
 
@@ -1778,10 +1859,29 @@
     }
   });
 
+  elements.chatToggle?.addEventListener('click', () => toggleDrawer('chat'));
+  elements.participantsToggle?.addEventListener('click', () => toggleDrawer('participants'));
+  elements.chatClose?.addEventListener('click', () => closeDrawer());
+  elements.participantsClose?.addEventListener('click', () => closeDrawer());
+  elements.drawerBackdrop?.addEventListener('click', () => closeDrawer());
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeDrawer();
+    }
+  });
+
   const init = async () => {
     await loadClass();
     await loadUser();
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
+    syncDrawerState();
+    document.body.classList.toggle('is-host', !!state.isHost);
+    document.body.classList.toggle('is-student', !state.isHost);
+    if (!state.isHost && elements.participantStrip) {
+      elements.participantStrip.classList.add('hidden');
+    } else if (state.isHost && elements.participantStrip) {
+      elements.participantStrip.classList.remove('hidden');
+    }
     await setupPreview();
     bindTrackToggles();
     state.lobby = state.classInfo.lobby || [];

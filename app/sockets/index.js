@@ -5,6 +5,7 @@ const { register } = require('./manager');
 const {
   ensureWhiteboard,
   ensureChatRoom,
+  startParticipantSession,
   endParticipantSession
 } = require('../utils/classState');
 
@@ -101,8 +102,27 @@ module.exports = (io) => {
         if (role === 'participant') {
           const index = klass.participants.findIndex((entry) => entry.token === participantToken);
           if (index !== -1) {
-            klass.participants[index].socketId = socket.id;
+            const participantEntry = klass.participants[index];
+            const previousSession = Array.isArray(participantEntry.sessions)
+              ? participantEntry.sessions[participantEntry.sessions.length - 1]
+              : null;
+            const returning = !!previousSession?.leftAt;
+            participantEntry.socketId = socket.id;
+            if (!previousSession || previousSession.leftAt) {
+              startParticipantSession(participantEntry);
+            }
             await klass.save();
+
+            if (returning) {
+              io.to(klass.meetingCode).emit('participant:joined', {
+                classCode: klass.meetingCode,
+                participant: {
+                  displayName: participantEntry.displayName,
+                  token: participantEntry.token,
+                  mediaState: participantEntry.mediaState || { audio: true, video: true }
+                }
+              });
+            }
           }
         }
 
