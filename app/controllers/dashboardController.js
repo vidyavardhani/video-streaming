@@ -24,7 +24,7 @@ exports.listLiveUsers = async (req, res) => {
             name: p.user.name,
             email: p.user.email,
             role: p.user.role,
-            classId: klass._id,
+            classCode: klass.meetingCode,
             classTitle: klass.title
           });
         } else {
@@ -32,7 +32,7 @@ exports.listLiveUsers = async (req, res) => {
             id: p.token,
             name: p.displayName,
             role: 'guest',
-            classId: klass._id,
+            classCode: klass.meetingCode,
             classTitle: klass.title
           });
         }
@@ -69,7 +69,11 @@ exports.analyticsOverview = async (req, res) => {
 
 exports.classChatLogs = async (req, res) => {
   try {
-    const messages = await Chat.find({ class: req.params.classId }).sort({ createdAt: 1 });
+    const klass = await ClassModel.findOne({ meetingCode: req.params.code });
+    if (!klass) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+    const messages = await Chat.find({ class: klass._id }).sort({ createdAt: 1 });
     res.json(messages);
   } catch (error) {
     console.error('Chat logs error', error);

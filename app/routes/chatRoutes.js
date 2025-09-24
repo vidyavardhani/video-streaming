@@ -6,13 +6,13 @@ const auth = require('../middleware/auth');
 const router = express.Router({ mergeParams: true });
 
 router.post(
-  '/:classId',
+  '/:code',
   auth.optional,
   [body('message').trim().isLength({ min: 1 })],
   chatController.sendMessage
 );
 
-router.get('/:classId', chatController.history);
-router.delete('/:classId/:msgId', auth.authenticate, chatController.remove);
+router.get('/:code', chatController.history);
+router.delete('/:code/:msgId', auth.authenticate, chatController.remove);
 
 module.exports = router;

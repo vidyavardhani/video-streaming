@@ -3,8 +3,8 @@ const Chat = require('../models/Chat');
 const ClassModel = require('../models/Class');
 const { getIO } = require('../sockets/manager');
 
-const ensureParticipant = async (classId, user, joinToken) => {
-  const klass = await ClassModel.findById(classId);
+const ensureParticipant = async (classCode, user, joinToken) => {
+  const klass = await ClassModel.findOne({ meetingCode: classCode });
   if (!klass) {
     return { error: 'Class not found' };
   }
@@ -35,7 +35,7 @@ exports.sendMessage = async (req, res) => {
 
   try {
     const { klass, displayName, userId, error } = await ensureParticipant(
-      req.params.classId,
+      req.params.code,
       req.user,
       req.body.joinToken
     );
@@ -51,7 +51,7 @@ exports.sendMessage = async (req, res) => {
       message: req.body.message
     });
 
-    getIO().to(klass._id.toString()).emit('chat:new', message);
+    getIO().to(klass.meetingCode).emit('chat:new', message);
 
     return res.status(201).json(message);
   } catch (error) {
@@ -62,7 +62,11 @@ exports.sendMessage = async (req, res) => {
 
 exports.history = async (req, res) => {
   try {
-    const messages = await Chat.find({ class: req.params.classId }).sort('createdAt');
+    const klass = await ClassModel.findOne({ meetingCode: req.params.code });
+    if (!klass) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+    const messages = await Chat.find({ class: klass._id }).sort('createdAt');
     return res.json(messages);
   } catch (error) {
     console.error('Chat history error', error);
@@ -72,7 +76,7 @@ exports.history = async (req, res) => {
 
 exports.remove = async (req, res) => {
   try {
-    const klass = await ClassModel.findById(req.params.classId);
+    const klass = await ClassModel.findOne({ meetingCode: req.params.code });
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
@@ -81,7 +85,7 @@ exports.remove = async (req, res) => {
     }
 
     await Chat.findByIdAndDelete(req.params.msgId);
-    getIO().to(klass._id.toString()).emit('chat:remove', { msgId: req.params.msgId });
+    getIO().to(klass.meetingCode).emit('chat:remove', { msgId: req.params.msgId });
     return res.json({ message: 'Message removed' });
   } catch (error) {
     console.error('Delete chat error', error);

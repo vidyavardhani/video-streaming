@@ -71,12 +71,12 @@ app.get('/dashboard', optional, (req, res) => {
   res.render('dashboard', { user: req.user });
 });
 
-app.get('/class/:id', (req, res) => {
-  res.render('class', { classId: req.params.id });
+app.get('/class/:code/end', (req, res) => {
+  res.render('end');
 });
 
-app.get('/class/:id/end', (req, res) => {
-  res.render('end');
+app.get('/class/:code', (req, res) => {
+  res.render('class', { classCode: req.params.code });
 });
 
 const PORT = process.env.PORT || 4000;

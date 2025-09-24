@@ -10,11 +10,30 @@ const generateMeetingCode = () => {
   return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
 };
 
+const createUniqueMeetingCode = async () => {
+  let attempts = 0;
+  while (attempts < 10) {
+    const code = generateMeetingCode();
+    const exists = await ClassModel.exists({ meetingCode: code });
+    if (!exists) {
+      return code;
+    }
+    attempts += 1;
+  }
+  throw new Error('Unable to generate unique meeting code');
+};
+
+const findClassByCode = async (code) => {
+  if (!code) return null;
+  return ClassModel.findOne({ meetingCode: code });
+};
+
 const publicClassShape = (klass) => ({
-  id: klass._id,
+  id: klass.meetingCode,
+  code: klass.meetingCode,
   title: klass.title,
   status: klass.status,
-  meetingLink: klass.meetingLink,
+  meetingLink: klass.meetingLink || `${baseUrl()}/class/${klass.meetingCode}`,
   meetingCode: klass.meetingCode,
   host: klass.host ? {
     id: klass.host._id,
@@ -27,7 +46,6 @@ const publicClassShape = (klass) => ({
     requestedAt: entry.requestedAt
   })),
   participants: klass.participants.map((entry) => ({
-    id: entry._id,
     displayName: entry.displayName,
     token: entry.token,
     joinedAt: entry.joinedAt
@@ -45,15 +63,16 @@ exports.create = async (req, res) => {
   }
 
   try {
+    const meetingCode = await createUniqueMeetingCode();
     const klass = await ClassModel.create({
       title: req.body.title,
       host: req.user._id,
-      meetingCode: generateMeetingCode()
+      meetingCode
     });
-    klass.meetingLink = `${baseUrl()}/class/${klass._id}`;
+    klass.meetingLink = `${baseUrl()}/class/${meetingCode}`;
     await klass.save();
     return res.status(201).json({
-      classId: klass._id,
+      classCode: klass.meetingCode,
       meetingLink: klass.meetingLink,
       meetingCode: klass.meetingCode
     });
@@ -65,7 +84,7 @@ exports.create = async (req, res) => {
 
 exports.start = async (req, res) => {
   try {
-    const klass = await ClassModel.findById(req.params.id);
+    const klass = await findClassByCode(req.params.code);
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
@@ -80,7 +99,7 @@ exports.start = async (req, res) => {
     klass.startTime = new Date();
     await klass.save();
 
-    getIO().to(klass._id.toString()).emit('class:started', { classId: klass._id });
+    getIO().to(klass.meetingCode).emit('class:started', { classCode: klass.meetingCode });
 
     return res.json({ message: 'Class started', class: publicClassShape(await klass.populate('host')) });
   } catch (error) {
@@ -91,7 +110,7 @@ exports.start = async (req, res) => {
 
 exports.end = async (req, res) => {
   try {
-    const klass = await ClassModel.findById(req.params.id);
+    const klass = await findClassByCode(req.params.code);
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
@@ -108,7 +127,7 @@ exports.end = async (req, res) => {
     klass.lobby = [];
     await klass.save();
 
-    getIO().to(klass._id.toString()).emit('class:ended', { classId: klass._id });
+    getIO().to(klass.meetingCode).emit('class:ended', { classCode: klass.meetingCode });
 
     return res.json({ message: 'Class ended' });
   } catch (error) {
@@ -119,7 +138,7 @@ exports.end = async (req, res) => {
 
 exports.join = async (req, res) => {
   try {
-    const klass = await ClassModel.findById(req.params.id);
+    const klass = await findClassByCode(req.params.code);
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
@@ -173,7 +192,7 @@ exports.join = async (req, res) => {
     await klass.save();
 
     getIO().to(klass.host.toString()).emit('lobby:update', {
-      classId: klass._id,
+      classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
 
@@ -194,7 +213,7 @@ exports.admit = async (req, res) => {
   }
 
   try {
-    const klass = await ClassModel.findById(req.params.id);
+    const klass = await findClassByCode(req.params.code);
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
@@ -218,7 +237,7 @@ exports.admit = async (req, res) => {
     await klass.save();
 
     const payload = {
-      classId: klass._id,
+      classCode: klass.meetingCode,
       participant: {
         displayName: participant.displayName,
         token: participant.token
@@ -226,10 +245,10 @@ exports.admit = async (req, res) => {
     };
 
     const io = getIO();
-    io.to(klass._id.toString()).emit('participant:joined', payload);
+    io.to(klass.meetingCode).emit('participant:joined', payload);
     io.to(participant.token).emit('participant:approved', payload);
     io.to(klass.host.toString()).emit('lobby:update', {
-      classId: klass._id,
+      classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
 
@@ -247,7 +266,7 @@ exports.remove = async (req, res) => {
   }
 
   try {
-    const klass = await ClassModel.findById(req.params.id);
+    const klass = await findClassByCode(req.params.code);
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
@@ -272,10 +291,10 @@ exports.remove = async (req, res) => {
     await klass.save();
 
     const io = getIO();
-    io.to(klass._id.toString()).emit('participant:removed', { joinToken });
+    io.to(klass.meetingCode).emit('participant:removed', { joinToken });
     io.to(joinToken).emit('participant:removed', { joinToken });
     io.to(klass.host.toString()).emit('lobby:update', {
-      classId: klass._id,
+      classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
 
@@ -288,7 +307,7 @@ exports.remove = async (req, res) => {
 
 exports.getOne = async (req, res) => {
   try {
-    const klass = await ClassModel.findById(req.params.id).populate('host');
+    const klass = await ClassModel.findOne({ meetingCode: req.params.code }).populate('host');
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }

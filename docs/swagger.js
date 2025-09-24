@@ -89,27 +89,27 @@ module.exports = {
         }
       }
     },
-    '/classes/{id}/start': {
+    '/classes/{code}/start': {
       patch: {
         summary: 'Start a class'
       }
     },
-    '/classes/{id}/end': {
+    '/classes/{code}/end': {
       patch: {
         summary: 'End a class'
       }
     },
-    '/classes/{id}/join': {
+    '/classes/{code}/join': {
       post: {
         summary: 'Join class lobby'
       }
     },
-    '/classes/{id}/admit': {
+    '/classes/{code}/admit': {
       post: {
         summary: 'Admit student from lobby'
       }
     },
-    '/classes/{id}/remove': {
+    '/classes/{code}/remove': {
       post: {
         summary: 'Remove participant'
       }
@@ -119,7 +119,7 @@ module.exports = {
         summary: 'List classes for the authenticated teacher'
       }
     },
-    '/classes/{id}': {
+    '/classes/{code}': {
       get: {
         summary: 'Get class details'
       }
@@ -129,7 +129,7 @@ module.exports = {
         summary: 'Get live classes'
       }
     },
-    '/chat/{classId}': {
+    '/chat/{code}': {
       get: {
         summary: 'Fetch chat history'
       },

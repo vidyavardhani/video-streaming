@@ -4,90 +4,134 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Live Class</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/public/css/style.css">
 </head>
 <body>
-  <div id="class-app" data-class-id="<%= classId %>">
+  <div id="class-app" data-class-code="<%= classCode %>">
     <section id="join-view">
-      <div class="preview-panel">
-        <header style="display:flex; justify-content: space-between; align-items: center; margin-bottom:1.5rem;">
-          <div>
-            <h1 id="meeting-title">Live Class</h1>
-            <p class="tag">Code: <span id="meeting-code">—</span></p>
+      <div class="join-layout">
+        <div class="join-card">
+          <header class="join-header">
+            <div>
+              <p class="pill">Upcoming class</p>
+              <h1 id="meeting-title">Live Class</h1>
+            </div>
+            <div class="meeting-actions">
+              <button id="copy-link" class="ghost" data-link="">Copy link</button>
+              <button id="copy-code" class="ghost" data-code="">Copy code</button>
+            </div>
+          </header>
+          <div class="meeting-code-card">
+            <span class="label">Meeting code</span>
+            <strong id="meeting-code">—</strong>
           </div>
-          <div style="display:flex; gap:0.75rem;">
-            <button id="copy-link" class="ghost" data-link="">Copy link</button>
-            <button id="copy-code" class="ghost" data-code="">Copy code</button>
+          <div class="preview-video-wrapper">
+            <video id="preview-video" autoplay muted playsinline></video>
           </div>
-        </header>
-        <div class="preview-video-wrapper">
-          <video id="preview-video" autoplay muted playsinline></video>
-        </div>
-        <label for="display-name">Your name</label>
-        <input id="display-name" type="text" placeholder="Enter your name">
-        <div class="controls" style="margin-top:1.5rem;">
-          <button class="ghost" id="toggle-mic">Mic</button>
-          <button class="ghost" id="toggle-camera">Camera</button>
-          <button class="primary" id="join-btn">Join class</button>
+          <label for="display-name" class="field-label">Your name</label>
+          <input id="display-name" type="text" placeholder="Enter your name" class="text-input">
+          <div class="preview-controls">
+            <button class="ghost pill-btn" id="toggle-mic">Mute preview</button>
+            <button class="ghost pill-btn" id="toggle-camera">Hide camera</button>
+            <button class="primary" id="join-btn">Join class</button>
+          </div>
         </div>
       </div>
     </section>
 
     <section id="lobby-view" class="hidden">
-      <div class="lobby-panel">
-        <h1>Waiting room</h1>
-        <p id="waiting-message" style="color: var(--muted);">Waiting for the host to let you in…</p>
+      <div class="status-card">
+        <div class="status-indicator waiting"></div>
+        <h2>Waiting room</h2>
+        <p id="waiting-message">Waiting for the host to let you in…</p>
       </div>
     </section>
 
     <section id="host-lobby" class="hidden">
-      <div class="lobby-panel">
-        <header style="display:flex; justify-content: space-between; align-items:center;">
+      <div class="host-lobby-card">
+        <header>
           <div>
-            <h1 id="meeting-title-host">Class lobby</h1>
-            <p style="color: var(--muted);">Start the class when you're ready.</p>
+            <h2>Lobby</h2>
+            <p>Review requests before starting.</p>
           </div>
           <button id="start-btn" class="primary">Start class</button>
         </header>
-        <h2 style="margin-top:1.5rem;">Waiting students</h2>
         <ul id="lobby-list" class="lobby-list"></ul>
       </div>
     </section>
 
     <section id="live-view" class="hidden">
-      <div class="live-layout">
-        <div class="primary-video">
-          <div class="video-grid" id="video-grid">
-            <div class="video-tile" data-local>
-              <video id="local-video" autoplay muted playsinline></video>
-              <span class="label">You</span>
+      <div class="meeting-shell">
+        <header class="meeting-header">
+          <div>
+            <h2 id="live-meeting-title">Live class</h2>
+            <p>Code <span id="live-meeting-code" class="mono">—</span></p>
+          </div>
+          <div class="header-meta">
+            <button class="ghost" id="share-info">Copy invite</button>
+            <span class="status-dot live">Live</span>
+          </div>
+        </header>
+        <div class="meeting-body">
+          <div class="stage">
+            <div class="stage-main" id="stage-main">
+              <video id="primary-video" autoplay playsinline></video>
+              <div class="stage-overlay">
+                <span id="primary-label">Connecting…</span>
+              </div>
             </div>
+            <div id="pip-container" class="stage-pip hidden">
+              <video id="pip-video" autoplay muted playsinline></video>
+              <span id="pip-label"></span>
+            </div>
+            <div id="participant-strip" class="participant-strip"></div>
           </div>
-          <div class="controls">
-            <button id="screen-share" class="ghost">Share screen</button>
-            <button id="leave-btn" class="ghost">Leave</button>
-            <button id="end-btn" class="danger ghost hidden">End class</button>
-          </div>
+          <aside class="meeting-sidebar">
+            <section id="live-lobby-card" class="lobby-card hidden">
+              <header>
+                <h3>Waiting to join</h3>
+                <span id="live-lobby-count" class="badge">0</span>
+              </header>
+              <ul id="live-lobby-list"></ul>
+            </section>
+            <section class="chat-panel">
+              <header>
+                <h3>Chat</h3>
+              </header>
+              <div id="chat-messages" class="chat-messages"></div>
+              <form id="chat-form" class="chat-form">
+                <input id="chat-text" type="text" placeholder="Send a message" autocomplete="off">
+              </form>
+            </section>
+            <section class="participants-card">
+              <header>
+                <h3>Participants</h3>
+              </header>
+              <ul id="participants-list" class="participants"></ul>
+            </section>
+          </aside>
         </div>
-        <aside class="sidebar">
-          <section class="chat-panel">
-            <h2>Chat</h2>
-            <div id="chat-messages" class="chat-messages"></div>
-            <form id="chat-form">
-              <input id="chat-text" type="text" placeholder="Send a message">
-            </form>
-          </section>
-          <section>
-            <h2>Participants</h2>
-            <ul id="participants-list" class="participants"></ul>
-          </section>
-        </aside>
+        <footer class="meeting-controls">
+          <div id="host-controls" class="control-cluster">
+            <button id="live-mic-toggle" class="control-btn" data-icon="🎤">Mic</button>
+            <button id="live-camera-toggle" class="control-btn" data-icon="📷">Camera</button>
+            <button id="screen-share" class="control-btn" data-icon="🖥">Share</button>
+          </div>
+          <div class="control-cluster">
+            <button id="leave-btn" class="control-btn ghost" data-icon="🚪">Leave</button>
+            <button id="end-btn" class="control-btn danger ghost hidden" data-icon="⏹">End</button>
+          </div>
+        </footer>
       </div>
     </section>
 
     <section id="ended-view" class="hidden">
-      <div class="end-panel">
-        <h1>The class has ended</h1>
+      <div class="status-card">
+        <div class="status-indicator ended"></div>
+        <h2>The class has ended</h2>
         <a href="/" class="secondary">Return to dashboard</a>
       </div>
     </section>

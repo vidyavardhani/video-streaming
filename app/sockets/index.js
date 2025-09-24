@@ -22,13 +22,14 @@ module.exports = (io) => {
 
     socket.on('session:join', async (payload, callback = () => {}) => {
       try {
-        const { classId, token, joinToken, displayName } = payload || {};
-        if (!classId) {
-          callback({ error: 'classId missing' });
+        const { classCode: providedCode, classId, token, joinToken, displayName } = payload || {};
+        const classCode = providedCode || classId;
+        if (!classCode) {
+          callback({ error: 'classCode missing' });
           return;
         }
 
-        const klass = await ClassModel.findById(classId);
+        const klass = await ClassModel.findOne({ meetingCode: classCode });
         if (!klass) {
           callback({ error: 'Class not found' });
           return;
@@ -72,7 +73,7 @@ module.exports = (io) => {
           return;
         }
 
-        socket.join(classId.toString());
+        socket.join(classCode);
         if (participantToken) {
           socket.join(participantToken);
         }
@@ -81,7 +82,8 @@ module.exports = (io) => {
         }
 
         socket.data = {
-          classId: classId.toString(),
+          classCode,
+          classMongoId: klass._id.toString(),
           role,
           userId: user ? user._id.toString() : null,
           name: user ? user.name : (participant?.displayName || displayName || 'Guest'),
@@ -114,37 +116,38 @@ module.exports = (io) => {
           callback({ error: 'Forbidden' });
           return;
         }
-        const klass = await ClassModel.findById(socket.data.classId);
+        const klass = await ClassModel.findById(socket.data.classMongoId);
         callback({ lobby: klass?.lobby || [] });
       } catch (error) {
         callback({ error: 'Failed to fetch lobby' });
       }
     });
 
-    socket.on('webrtc:signal', ({ classId, target, data }) => {
-      if (!classId || !target || !data) return;
+    socket.on('webrtc:signal', ({ classCode, target, data }) => {
+      const roomCode = classCode || socket.data.classCode;
+      if (!roomCode || !target || !data) return;
       io.to(target).emit('webrtc:signal', {
         from: socket.id,
         data,
-        classId,
+        classCode: roomCode,
         role: socket.data.role,
         fromToken: socket.data.token || (socket.data.role === 'host' ? 'host' : socket.id)
       });
     });
 
     socket.on('disconnect', async () => {
-      const { classId, token, role } = socket.data || {};
-      if (!classId || role === 'host') {
+      const { classMongoId, classCode, token, role } = socket.data || {};
+      if (!classMongoId || role === 'host') {
         return;
       }
       try {
-        const klass = await ClassModel.findById(classId);
+        const klass = await ClassModel.findById(classMongoId);
         if (!klass) return;
         const participant = klass.participants.find((entry) => entry.token === token);
         if (participant) {
           participant.socketId = null;
           await klass.save();
-          io.to(classId).emit('participant:disconnected', { joinToken: token });
+          io.to(classCode).emit('participant:disconnected', { joinToken: token });
         }
       } catch (error) {
         console.error('disconnect error', error);

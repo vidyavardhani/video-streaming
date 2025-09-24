@@ -53,7 +53,11 @@ const classSchema = new mongoose.Schema({
     default: 'scheduled'
   },
   meetingLink: String,
-  meetingCode: String,
+  meetingCode: {
+    type: String,
+    unique: true,
+    index: true
+  },
   lobby: {
     type: [lobbySchema],
     default: []

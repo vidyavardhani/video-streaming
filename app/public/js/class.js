@@ -2,9 +2,9 @@
   const root = document.getElementById('class-app');
   if (!root) return;
 
-  const classId = root.dataset.classId;
+  const classCode = root.dataset.classCode;
   const tokenKey = 'vs_token';
-  const joinKey = `vs_join_${classId}`;
+  const joinKey = `vs_join_${classCode}`;
 
   const state = {
     socket: null,
@@ -15,9 +15,11 @@
     admitted: false,
     localStream: null,
     screenStream: null,
+    screenSenders: [],
     peers: new Map(),
     videos: new Map(),
-    lobby: []
+    lobby: [],
+    hostMedia: { camera: null, screen: null }
   };
 
   const elements = {
@@ -27,8 +29,13 @@
     liveView: document.getElementById('live-view'),
     endedView: document.getElementById('ended-view'),
     previewVideo: document.getElementById('preview-video'),
-    localVideo: document.getElementById('local-video'),
-    videoGrid: document.getElementById('video-grid'),
+    primaryContainer: document.getElementById('stage-main'),
+    primaryVideo: document.getElementById('primary-video'),
+    primaryLabel: document.getElementById('primary-label'),
+    pipContainer: document.getElementById('pip-container'),
+    pipVideo: document.getElementById('pip-video'),
+    pipLabel: document.getElementById('pip-label'),
+    participantStrip: document.getElementById('participant-strip'),
     nameInput: document.getElementById('display-name'),
     joinButton: document.getElementById('join-btn'),
     startButton: document.getElementById('start-btn'),
@@ -36,22 +43,55 @@
     admitList: document.getElementById('lobby-list'),
     meetingTitle: document.getElementById('meeting-title'),
     meetingCode: document.getElementById('meeting-code'),
+    liveMeetingTitle: document.getElementById('live-meeting-title'),
+    liveMeetingCode: document.getElementById('live-meeting-code'),
     copyLink: document.getElementById('copy-link'),
     copyCode: document.getElementById('copy-code'),
+    shareInfo: document.getElementById('share-info'),
     chatForm: document.getElementById('chat-form'),
     chatInput: document.getElementById('chat-text'),
     chatMessages: document.getElementById('chat-messages'),
     muteBtn: document.getElementById('toggle-mic'),
     cameraBtn: document.getElementById('toggle-camera'),
+    liveMicToggle: document.getElementById('live-mic-toggle'),
+    liveCameraToggle: document.getElementById('live-camera-toggle'),
     screenShareBtn: document.getElementById('screen-share'),
     leaveBtn: document.getElementById('leave-btn'),
     waitingMessage: document.getElementById('waiting-message'),
-    participantsList: document.getElementById('participants-list')
+    participantsList: document.getElementById('participants-list'),
+    hostControls: document.getElementById('host-controls'),
+    liveLobbyCard: document.getElementById('live-lobby-card'),
+    liveLobbyList: document.getElementById('live-lobby-list'),
+    liveLobbyCount: document.getElementById('live-lobby-count')
   };
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
   const getStoredToken = () => window.localStorage.getItem(tokenKey);
+
+  const toInitials = (name = '') => {
+    const letters = name
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join('');
+    if (letters) return letters;
+    return name.slice(0, 2).toUpperCase() || '??';
+  };
+
+  const formatTime = (value) => {
+    if (!value) return '—';
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(new Date(value));
+    } catch (error) {
+      return '—';
+    }
+  };
 
   const setView = (name) => {
     ['joinView', 'lobbyView', 'hostLobbyView', 'liveView', 'endedView'].forEach((key) => {
@@ -61,26 +101,81 @@
   };
 
   const renderLobby = () => {
-    if (!elements.admitList) return;
-    elements.admitList.innerHTML = '';
-    if (!state.lobby.length) {
-      elements.admitList.innerHTML = '<li class="empty">No one is waiting.</li>';
-      return;
-    }
-    state.lobby.forEach((entry) => {
+    const buildRow = (entry) => {
       const li = document.createElement('li');
       li.className = 'lobby-entry';
-      li.innerHTML = `
-        <span>${entry.displayName}</span>
-        <div class="actions">
-          <button data-token="${entry.token}" class="primary">Admit</button>
-          <button data-token="${entry.token}" class="ghost">Remove</button>
-        </div>
-      `;
-      li.querySelector('.primary').addEventListener('click', () => admit(entry.token));
-      li.querySelector('.ghost').addEventListener('click', () => removeParticipant(entry.token));
-      elements.admitList.appendChild(li);
-    });
+
+      const identity = document.createElement('div');
+      identity.className = 'identity';
+
+      const avatar = document.createElement('span');
+      avatar.className = 'avatar-bubble';
+      avatar.textContent = toInitials(entry.displayName || 'Guest');
+
+      const meta = document.createElement('div');
+      const nameEl = document.createElement('strong');
+      nameEl.textContent = entry.displayName || 'Guest';
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.textContent = 'Lobby';
+      meta.appendChild(nameEl);
+      meta.appendChild(hint);
+
+      identity.appendChild(avatar);
+      identity.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+
+      const approve = document.createElement('button');
+      approve.type = 'button';
+      approve.className = 'icon-btn approve';
+      approve.textContent = '✓';
+      approve.setAttribute('aria-label', `Admit ${entry.displayName || 'participant'}`);
+      approve.addEventListener('click', () => admit(entry.token));
+
+      const reject = document.createElement('button');
+      reject.type = 'button';
+      reject.className = 'icon-btn reject';
+      reject.textContent = '✕';
+      reject.setAttribute('aria-label', `Remove ${entry.displayName || 'participant'}`);
+      reject.addEventListener('click', () => removeParticipant(entry.token));
+
+      actions.appendChild(approve);
+      actions.appendChild(reject);
+
+      li.appendChild(identity);
+      li.appendChild(actions);
+
+      return li;
+    };
+
+    if (elements.admitList) {
+      elements.admitList.innerHTML = '';
+      if (!state.lobby.length) {
+        const empty = document.createElement('li');
+        empty.className = 'empty';
+        empty.textContent = 'No one is waiting.';
+        elements.admitList.appendChild(empty);
+      } else {
+        state.lobby.forEach((entry) => {
+          elements.admitList.appendChild(buildRow(entry));
+        });
+      }
+    }
+
+    if (elements.liveLobbyList && elements.liveLobbyCard && elements.liveLobbyCount) {
+      elements.liveLobbyList.innerHTML = '';
+      if (state.isHost && state.lobby.length) {
+        state.lobby.forEach((entry) => {
+          elements.liveLobbyList.appendChild(buildRow(entry));
+        });
+        elements.liveLobbyCard.classList.remove('hidden');
+      } else {
+        elements.liveLobbyCard.classList.add('hidden');
+      }
+      elements.liveLobbyCount.textContent = state.lobby.length;
+    }
   };
 
   const renderParticipants = () => {
@@ -99,22 +194,21 @@
     });
   };
 
-  const createVideoEl = (id, label) => {
+  const ensureParticipantTile = (id, label) => {
+    if (!elements.participantStrip) return null;
     let el = state.videos.get(id);
     if (!el) {
       el = document.createElement('div');
-      el.className = 'video-tile';
+      el.className = 'participant-tile';
       el.innerHTML = `
         <video playsinline autoplay></video>
-        <span class="label">${label || ''}</span>
+        <span>${label || ''}</span>
       `;
-      elements.videoGrid.appendChild(el);
+      elements.participantStrip.appendChild(el);
       state.videos.set(id, el);
     } else if (label) {
-      const labelEl = el.querySelector('.label');
-      if (labelEl) {
-        labelEl.textContent = label;
-      }
+      const labelEl = el.querySelector('span');
+      if (labelEl) labelEl.textContent = label;
     }
     return el.querySelector('video');
   };
@@ -122,9 +216,135 @@
   const removeVideoEl = (id) => {
     const el = state.videos.get(id);
     if (el) {
+      const video = el.querySelector('video');
+      if (video) {
+        video.srcObject = null;
+      }
       el.remove();
       state.videos.delete(id);
     }
+  };
+
+  const setVideoSource = (video, stream, muted = false) => {
+    if (!video) return;
+    if ('srcObject' in video) {
+      if (video.srcObject !== stream) {
+        video.srcObject = stream;
+      }
+    } else {
+      video.src = window.URL.createObjectURL(stream);
+    }
+    video.muted = muted;
+  };
+
+  const updatePrimaryStream = (stream, label, muted = false) => {
+    if (!elements.primaryVideo) return;
+    if (stream) {
+      setVideoSource(elements.primaryVideo, stream, muted);
+      elements.primaryContainer?.classList.remove('placeholder');
+    } else {
+      elements.primaryVideo.srcObject = null;
+      elements.primaryContainer?.classList.add('placeholder');
+    }
+    if (elements.primaryLabel) {
+      elements.primaryLabel.textContent = label || '';
+    }
+  };
+
+  const updatePipStream = (stream, label, muted = true) => {
+    if (!elements.pipContainer || !elements.pipVideo) return;
+    if (stream) {
+      elements.pipContainer.classList.remove('hidden');
+      setVideoSource(elements.pipVideo, stream, muted);
+      if (elements.pipLabel) {
+        elements.pipLabel.textContent = label || '';
+      }
+    } else {
+      elements.pipContainer.classList.add('hidden');
+      elements.pipVideo.srcObject = null;
+      if (elements.pipLabel) {
+        elements.pipLabel.textContent = '';
+      }
+    }
+  };
+
+  const refreshStage = () => {
+    if (state.isHost) {
+      if (state.screenStream) {
+        updatePrimaryStream(state.screenStream, 'You are sharing your screen', true);
+        const localActive = !!state.localStream?.getVideoTracks().some((track) => track.enabled);
+        if (state.localStream && localActive) {
+          updatePipStream(state.localStream, 'You', true);
+        } else {
+          updatePipStream(null);
+        }
+      } else if (state.localStream && state.localStream.getVideoTracks().some((track) => track.enabled)) {
+        updatePrimaryStream(state.localStream, 'You', true);
+        updatePipStream(null);
+      } else {
+        updatePrimaryStream(null, 'Waiting for your camera…', true);
+        updatePipStream(null);
+      }
+    } else {
+      const hostName = state.classInfo?.host?.name || 'Host';
+      if (state.hostMedia.screen) {
+        updatePrimaryStream(state.hostMedia.screen, `${hostName} · Screen`, false);
+        if (state.hostMedia.camera && isRemoteVideoActive(state.hostMedia.camera)) {
+          updatePipStream(state.hostMedia.camera, hostName, false);
+        } else {
+          updatePipStream(null);
+        }
+      } else if (state.hostMedia.camera && isRemoteVideoActive(state.hostMedia.camera)) {
+        updatePrimaryStream(state.hostMedia.camera, hostName, false);
+        updatePipStream(null);
+      } else {
+        updatePrimaryStream(null, 'Waiting for the host…', false);
+        updatePipStream(null);
+      }
+    }
+  };
+
+  const detectScreenTrack = (stream) => {
+    const [track] = stream.getVideoTracks();
+    if (!track) return false;
+    const label = track.label?.toLowerCase() || '';
+    return label.includes('screen') || label.includes('display') || label.includes('window');
+  };
+
+  const isRemoteVideoActive = (stream) => {
+    const [track] = stream?.getVideoTracks() || [];
+    if (!track) return false;
+    if (typeof track.muted === 'boolean') {
+      return !track.muted;
+    }
+    return track.readyState === 'live';
+  };
+
+  const handleHostMediaTrack = (type, stream) => {
+    if (type === 'screen') {
+      state.hostMedia.screen = stream;
+      stream.getVideoTracks().forEach((track) => {
+        track.onended = () => {
+          state.hostMedia.screen = null;
+          refreshStage();
+        };
+      });
+    } else if (type === 'camera') {
+      state.hostMedia.camera = stream;
+      stream.getVideoTracks().forEach((track) => {
+        track.onended = () => {
+          state.hostMedia.camera = null;
+          refreshStage();
+        };
+      });
+    }
+    refreshStage();
+  };
+
+  const attachParticipantStream = (id, stream, label) => {
+    const videoEl = ensureParticipantTile(id, label);
+    if (!videoEl) return;
+    setVideoSource(videoEl, stream, id === state.joinToken);
   };
 
   const getNameByToken = (token) => {
@@ -136,12 +356,16 @@
   };
 
   const attachStream = (id, stream, label) => {
-    const video = createVideoEl(id, label || getNameByToken(id));
-    if ('srcObject' in video) {
-      video.srcObject = stream;
-    } else {
-      video.src = window.URL.createObjectURL(stream);
+    if (!stream) return;
+    if (id === 'host' && !state.isHost) {
+      const type = detectScreenTrack(stream) ? 'screen' : 'camera';
+      handleHostMediaTrack(type, stream);
+      return;
     }
+    if (id === 'host' && state.isHost) {
+      return;
+    }
+    attachParticipantStream(id, stream, label || getNameByToken(id));
   };
 
   const stopStream = (stream) => {
@@ -154,11 +378,15 @@
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       state.localStream = stream;
       if (elements.previewVideo) {
-        elements.previewVideo.srcObject = stream;
+        setVideoSource(elements.previewVideo, stream, true);
       }
-      if (elements.localVideo) {
-        elements.localVideo.srcObject = stream;
+      if (!state.isHost) {
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
       }
+      refreshStage();
+      syncTrackButtons();
     } catch (error) {
       console.warn('Media error', error);
     }
@@ -174,14 +402,25 @@
     if (elements.copyCode) {
       elements.copyCode.dataset.code = state.classInfo.meetingCode;
     }
+    if (elements.liveMeetingTitle) {
+      elements.liveMeetingTitle.textContent = state.classInfo.title;
+    }
+    if (elements.liveMeetingCode) {
+      elements.liveMeetingCode.textContent = state.classInfo.meetingCode;
+    }
+    if (elements.shareInfo) {
+      elements.shareInfo.dataset.link = state.classInfo.meetingLink;
+    }
+    refreshStage();
   };
 
   const loadClass = async () => {
-    const res = await fetch(`/classes/${classId}`);
+    const res = await fetch(`/classes/${classCode}`);
     if (!res.ok) throw new Error('Failed to load class');
     state.classInfo = await res.json();
     updateMeetingMeta();
     renderParticipants();
+    refreshStage();
   };
 
   const loadUser = async () => {
@@ -202,7 +441,7 @@
       state.socket.emit(
         'session:join',
         {
-          classId,
+          classCode,
           token: getStoredToken(),
           joinToken: state.joinToken,
           displayName: elements.nameInput?.value || state.user?.name
@@ -217,6 +456,16 @@
           sessionStorage.setItem(joinKey, state.joinToken);
         }
         state.isHost = response.role === 'host';
+        if (elements.hostControls) {
+          elements.hostControls.classList.toggle('hidden', !state.isHost);
+        }
+        if (elements.screenShareBtn) {
+          elements.screenShareBtn.classList.toggle('hidden', !state.isHost);
+        }
+        if (elements.endButton) {
+          elements.endButton.classList.toggle('hidden', !state.isHost);
+        }
+        refreshStage();
         state.admitted = response.role === 'participant' && state.classInfo?.status === 'live';
         if (response.classStatus === 'ended') {
           setView('endedView');
@@ -294,6 +543,7 @@
       }
       removeVideoEl(joinToken);
       state.peers.delete(joinToken);
+      state.screenSenders = state.screenSenders.filter(({ token }) => token !== joinToken);
     });
 
     state.socket.on('participant:disconnected', ({ joinToken }) => {
@@ -303,6 +553,7 @@
       }
       removeVideoEl(joinToken);
       state.peers.delete(joinToken);
+      state.screenSenders = state.screenSenders.filter(({ token }) => token !== joinToken);
     });
 
     state.socket.on('class:started', () => {
@@ -314,6 +565,7 @@
         setView('liveView');
         beginCall();
       }
+      refreshStage();
     });
 
     state.socket.on('class:ended', () => {
@@ -354,8 +606,9 @@
       if (key !== 'local') node.remove();
     });
     state.videos = new Map();
-    stopStream(state.screenStream);
-    state.screenStream = null;
+    stopScreenShare();
+    state.hostMedia = { camera: null, screen: null };
+    refreshStage();
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -367,11 +620,18 @@
     if (state.localStream) {
       state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
     }
+    if (state.isHost && state.screenStream) {
+      const [screenTrack] = state.screenStream.getVideoTracks();
+      if (screenTrack) {
+        const sender = pc.addTrack(screenTrack, state.screenStream);
+        state.screenSenders.push({ pc, sender, token: targetToken });
+      }
+    }
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         state.socket.emit('webrtc:signal', {
-          classId,
+          classCode,
           target: targetToken,
           data: { type: 'candidate', candidate: event.candidate }
         });
@@ -396,7 +656,7 @@
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           state.socket.emit('webrtc:signal', {
-            classId,
+            classCode,
             target: targetToken,
             data: { type: 'offer', sdp: offer }
           });
@@ -407,6 +667,20 @@
     }
 
     return pc;
+  };
+
+  const renegotiate = async (pc, targetToken) => {
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      state.socket.emit('webrtc:signal', {
+        classCode,
+        target: targetToken,
+        data: { type: 'offer', sdp: offer }
+      });
+    } catch (error) {
+      console.error('Renegotiation error', error);
+    }
   };
 
   const handleSignal = async ({ fromToken, data }) => {
@@ -430,7 +704,7 @@
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         state.socket.emit('webrtc:signal', {
-          classId,
+          classCode,
           target: token,
           data: { type: 'answer', sdp: answer }
         });
@@ -448,21 +722,48 @@
     if (!message) return;
     const wrapper = document.createElement('div');
     wrapper.className = 'chat-item';
-    wrapper.dataset.id = message._id;
-    const header = document.createElement('div');
-    header.className = 'chat-meta';
-    header.textContent = `${message.senderName || 'User'} · ${new Date(message.createdAt).toLocaleTimeString()}`;
-    const body = document.createElement('p');
-    body.textContent = message.message;
-    wrapper.appendChild(header);
-    wrapper.appendChild(body);
+    if (message._id) {
+      wrapper.dataset.id = message._id;
+    }
+
+    const avatar = document.createElement('div');
+    avatar.className = 'chat-avatar';
+    avatar.textContent = toInitials(message.senderName || 'User');
+
+    const content = document.createElement('div');
+    content.className = 'chat-content';
+
+    const metaRow = document.createElement('div');
+    metaRow.className = 'chat-meta-row';
+
+    const author = document.createElement('span');
+    author.className = 'chat-author';
+    author.textContent = message.senderName || 'User';
+
+    const time = document.createElement('span');
+    time.className = 'chat-time';
+    time.textContent = formatTime(message.createdAt);
+
+    metaRow.appendChild(author);
+    metaRow.appendChild(time);
+
+    const text = document.createElement('p');
+    text.className = 'chat-text';
+    text.textContent = message.message || '';
+
+    content.appendChild(metaRow);
+    content.appendChild(text);
+
+    wrapper.appendChild(avatar);
+    wrapper.appendChild(content);
+
     elements.chatMessages.appendChild(wrapper);
     elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
   };
 
   const loadChatHistory = async () => {
     try {
-      const res = await fetch(`/chat/${classId}`);
+      const res = await fetch(`/chat/${classCode}`);
       if (!res.ok) return;
       const messages = await res.json();
       messages.forEach(appendMessage);
@@ -472,7 +773,7 @@
   };
 
   const admit = async (token) => {
-    await fetch(`/classes/${classId}/admit`, {
+    await fetch(`/classes/${classCode}/admit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ joinToken: token })
@@ -480,7 +781,7 @@
   };
 
   const removeParticipant = async (token) => {
-    await fetch(`/classes/${classId}/remove`, {
+    await fetch(`/classes/${classCode}/remove`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ joinToken: token })
@@ -503,7 +804,7 @@
       alert('Enter your name');
       return;
     }
-    const res = await fetch(`/classes/${classId}/join`, {
+    const res = await fetch(`/classes/${classCode}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ displayName })
@@ -522,7 +823,7 @@
   });
 
   elements.startButton?.addEventListener('click', async () => {
-    const res = await fetch(`/classes/${classId}/start`, { method: 'PATCH' });
+    const res = await fetch(`/classes/${classCode}/start`, { method: 'PATCH' });
     if (!res.ok) {
       alert('Unable to start class');
       return;
@@ -533,7 +834,7 @@
   });
 
   elements.endButton?.addEventListener('click', async () => {
-    await fetch(`/classes/${classId}/end`, { method: 'PATCH' });
+    await fetch(`/classes/${classCode}/end`, { method: 'PATCH' });
     leaveSession();
     setView('endedView');
   });
@@ -564,12 +865,19 @@
     setTimeout(() => (e.currentTarget.textContent = 'Copy code'), 1500);
   });
 
+  elements.shareInfo?.addEventListener('click', async (e) => {
+    const link = elements.copyLink?.dataset.link || e.currentTarget.dataset.link || window.location.href;
+    await navigator.clipboard.writeText(link);
+    e.currentTarget.textContent = 'Copied!';
+    setTimeout(() => (e.currentTarget.textContent = 'Copy invite'), 1500);
+  });
+
   elements.chatForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = elements.chatInput.value.trim();
     if (!text) return;
     const body = { message: text, joinToken: state.joinToken };
-    const res = await fetch(`/chat/${classId}`, {
+    const res = await fetch(`/chat/${classCode}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -579,6 +887,21 @@
     }
   });
 
+  const setToggleState = (button, activeLabel, inactiveLabel, isActive) => {
+    if (!button) return;
+    button.classList.toggle('is-off', !isActive);
+    button.textContent = isActive ? activeLabel : inactiveLabel;
+  };
+
+  const syncTrackButtons = () => {
+    const audioEnabled = !!state.localStream?.getAudioTracks().some((track) => track.enabled);
+    const videoEnabled = !!state.localStream?.getVideoTracks().some((track) => track.enabled);
+    setToggleState(elements.muteBtn, 'Mic on', 'Mic off', audioEnabled);
+    setToggleState(elements.liveMicToggle, 'Mic on', 'Mic off', audioEnabled);
+    setToggleState(elements.cameraBtn, 'Camera on', 'Camera off', videoEnabled);
+    setToggleState(elements.liveCameraToggle, 'Camera on', 'Camera off', videoEnabled);
+  };
+
   const toggleTrack = (kind) => {
     if (!state.localStream) return;
     state.localStream.getTracks().forEach((track) => {
@@ -586,40 +909,60 @@
         track.enabled = !track.enabled;
       }
     });
+    if (kind === 'video') {
+      refreshStage();
+    }
+    syncTrackButtons();
   };
 
-  elements.muteBtn?.addEventListener('click', () => {
-    toggleTrack('audio');
-  });
-  elements.cameraBtn?.addEventListener('click', () => {
-    toggleTrack('video');
-  });
+  const stopScreenShare = () => {
+    if (!state.screenStream) return;
+    state.screenSenders.forEach(({ pc, sender, token }) => {
+      try {
+        pc.removeTrack(sender);
+        renegotiate(pc, token);
+      } catch (error) {
+        console.error('Screen share cleanup error', error);
+      }
+    });
+    state.screenSenders = [];
+    stopStream(state.screenStream);
+    state.screenStream = null;
+    refreshStage();
+    if (elements.screenShareBtn) {
+      elements.screenShareBtn.textContent = 'Share screen';
+    }
+  };
+
+  const bindTrackToggles = () => {
+    elements.muteBtn?.addEventListener('click', () => toggleTrack('audio'));
+    elements.cameraBtn?.addEventListener('click', () => toggleTrack('video'));
+    elements.liveMicToggle?.addEventListener('click', () => toggleTrack('audio'));
+    elements.liveCameraToggle?.addEventListener('click', () => toggleTrack('video'));
+  };
 
   elements.screenShareBtn?.addEventListener('click', async () => {
+    if (!state.isHost) return;
     if (state.screenStream) {
-      stopStream(state.screenStream);
-      state.screenStream = null;
-      state.localStream.getTracks().forEach((track) => track.enabled = true);
+      stopScreenShare();
       return;
     }
     try {
-      state.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      const [screenTrack] = state.screenStream.getVideoTracks();
-      const videoSenders = [];
-      state.peers.forEach((pc) => {
-        const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-        if (sender) {
-          videoSenders.push(sender);
-        }
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      state.screenStream = displayStream;
+      refreshStage();
+      const [screenTrack] = displayStream.getVideoTracks();
+      state.screenSenders = [];
+      state.peers.forEach((pc, token) => {
+        const sender = pc.addTrack(screenTrack, displayStream);
+        state.screenSenders.push({ pc, sender, token });
+        renegotiate(pc, token);
       });
-      videoSenders.forEach((sender) => sender.replaceTrack(screenTrack));
+      if (elements.screenShareBtn) {
+        elements.screenShareBtn.textContent = 'Stop sharing';
+      }
       screenTrack.onended = () => {
-        videoSenders.forEach((sender) => {
-          const track = state.localStream?.getVideoTracks()[0];
-          if (track) sender.replaceTrack(track);
-        });
-        stopStream(state.screenStream);
-        state.screenStream = null;
+        stopScreenShare();
       };
     } catch (error) {
       console.error('Screen share error', error);
@@ -629,15 +972,18 @@
   const init = async () => {
     await loadClass();
     await loadUser();
-    await setupPreview();
-
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
+    await setupPreview();
+    bindTrackToggles();
     state.lobby = state.classInfo.lobby || [];
     if (elements.endButton) {
       elements.endButton.classList.toggle('hidden', !state.isHost);
     }
     if (elements.screenShareBtn) {
       elements.screenShareBtn.classList.toggle('hidden', !state.isHost);
+    }
+    if (elements.hostControls) {
+      elements.hostControls.classList.toggle('hidden', !state.isHost);
     }
     if (state.isHost) {
       elements.nameInput.value = state.user.name;
