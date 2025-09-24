@@ -504,7 +504,8 @@
     if (!elements.handRaiseBtn) return;
     elements.handRaiseBtn.classList.toggle('hidden', state.isHost);
     if (state.isHost) return;
-    elements.handRaiseBtn.disabled = !state.admitted;
+    const canRaise = state.admitted && state.classInfo?.status === 'live';
+    elements.handRaiseBtn.disabled = !canRaise;
     elements.handRaiseBtn.textContent = state.handRaised ? 'Lower hand' : 'Raise hand';
   };
 
@@ -1060,40 +1061,48 @@
             console.error(response.error);
             return;
           }
-        if (response.joinToken) {
-          state.joinToken = response.joinToken;
-          sessionStorage.setItem(joinKey, state.joinToken);
-        }
-        state.isHost = response.role === 'host';
-        if (elements.hostControls) {
-          elements.hostControls.classList.toggle('hidden', !state.isHost);
-        }
-        if (elements.screenShareBtn) {
-          elements.screenShareBtn.classList.toggle('hidden', !state.isHost);
-        }
-        if (elements.endButton) {
-          elements.endButton.classList.toggle('hidden', !state.isHost);
-        }
-        refreshStage();
-        updateHandRaiseButton();
-        state.admitted = response.role === 'participant' && state.classInfo?.status === 'live';
-        if (response.classStatus === 'ended') {
-          setView('endedView');
-          return;
-        }
-        if (state.isHost) {
-          if (state.classInfo.status === 'live') {
+          if (response.joinToken) {
+            state.joinToken = response.joinToken;
+            sessionStorage.setItem(joinKey, state.joinToken);
+          }
+          state.isHost = response.role === 'host';
+          if (elements.hostControls) {
+            elements.hostControls.classList.toggle('hidden', !state.isHost);
+          }
+          if (elements.screenShareBtn) {
+            elements.screenShareBtn.classList.toggle('hidden', !state.isHost);
+          }
+          if (elements.endButton) {
+            elements.endButton.classList.toggle('hidden', !state.isHost);
+          }
+          if (response.classStatus) {
+            state.classInfo.status = response.classStatus;
+          }
+          state.admitted = response.role === 'participant';
+          refreshStage();
+          updateHandRaiseButton();
+          if (response.classStatus === 'ended') {
+            setView('endedView');
+            return;
+          }
+          if (state.isHost) {
+            if (state.classInfo.status === 'live') {
+              setView('liveView');
+              beginCall();
+            } else {
+              setView('hostLobbyView');
+              refreshLobby();
+            }
+          } else if (state.admitted && state.classInfo.status === 'live') {
             setView('liveView');
             beginCall();
-          } else {
-            setView('hostLobbyView');
-            refreshLobby();
+          } else if (state.admitted) {
+            setView('lobbyView');
+            if (elements.waitingMessage) {
+              elements.waitingMessage.textContent = 'Waiting for the host to start the class…';
+            }
           }
-        } else if (state.admitted) {
-          setView('liveView');
-          beginCall();
-        }
-        emitMediaUpdate();
+          emitMediaUpdate();
         }
       );
     });
@@ -1104,18 +1113,33 @@
       renderLobby();
     });
 
-    state.socket.on('participant:approved', ({ participant }) => {
+    state.socket.on('participant:approved', ({ participant, classStatus }) => {
       if (participant?.token && participant.token === state.joinToken) {
         state.admitted = true;
-        state.classInfo.participants = state.classInfo.participants || [];
-        if (!state.classInfo.participants.some((p) => p.token === participant.token)) {
-          state.classInfo.participants.push(participant);
-          applyMediaState(participant.token, participant.mediaState);
-          renderParticipants();
+        if (classStatus) {
+          state.classInfo.status = classStatus;
         }
-        setView('liveView');
-        beginCall();
-        elements.waitingMessage.textContent = 'Joining the class…';
+        state.classInfo.participants = state.classInfo.participants || [];
+        const existing = state.classInfo.participants.find((p) => p.token === participant.token);
+        if (existing) {
+          Object.assign(existing, participant);
+        } else {
+          state.classInfo.participants.push(participant);
+        }
+        applyMediaState(participant.token, participant.mediaState);
+        renderParticipants();
+        if (state.classInfo.status === 'live') {
+          setView('liveView');
+          beginCall();
+          if (elements.waitingMessage) {
+            elements.waitingMessage.textContent = 'Joining the class…';
+          }
+        } else {
+          setView('lobbyView');
+          if (elements.waitingMessage) {
+            elements.waitingMessage.textContent = 'Waiting for the host to start the class…';
+          }
+        }
         state.handRaised = false;
         updateHandRaiseButton();
       }
@@ -1182,6 +1206,10 @@
 
     state.socket.on('class:started', () => {
       state.classInfo.status = 'live';
+      updateHandRaiseButton();
+      if (!state.isHost && state.admitted && elements.waitingMessage) {
+        elements.waitingMessage.textContent = 'Joining the class…';
+      }
       if (state.isHost) {
         beginCall();
         setView('liveView');
@@ -1193,6 +1221,9 @@
     });
 
     state.socket.on('class:ended', () => {
+      if (state.classInfo) {
+        state.classInfo.status = 'ended';
+      }
       leaveSession();
       setView('endedView');
       sessionStorage.removeItem(joinKey);

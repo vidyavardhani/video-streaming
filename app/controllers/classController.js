@@ -310,17 +310,24 @@ exports.admit = async (req, res) => {
     klass.participants.push(participant);
     await klass.save();
 
+    const participantPayload = {
+      displayName: participant.displayName,
+      token: participant.token,
+      mediaState: participant.mediaState,
+      joinedAt: participant.joinedAt
+    };
+
     const payload = {
       classCode: klass.meetingCode,
-      participant: {
-        displayName: participant.displayName,
-        token: participant.token
-      }
+      participant: participantPayload
     };
 
     const io = getIO();
     io.to(klass.meetingCode).emit('participant:joined', payload);
-    io.to(participant.token).emit('participant:approved', payload);
+    io.to(participant.token).emit('participant:approved', {
+      ...payload,
+      classStatus: klass.status
+    });
     const hostId = getHostId(klass);
     if (hostId) {
       io.to(hostId).emit('lobby:update', {
