@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Class</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/public/css/style.css">
+</head>
+<body>
+  <div id="class-app" data-class-code="<%= classCode %>">
+    <section id="join-view">
+      <div class="join-layout">
+        <div class="join-card">
+          <header class="join-header">
+            <div>
+              <p class="pill">Upcoming class</p>
+              <h1 id="meeting-title">Live Class</h1>
+            </div>
+            <div class="meeting-actions">
+              <button id="copy-link" class="ghost" data-link="">Copy link</button>
+              <button id="copy-code" class="ghost" data-code="">Copy code</button>
+            </div>
+          </header>
+          <div class="meeting-code-card">
+            <span class="label">Meeting code</span>
+            <strong id="meeting-code">—</strong>
+          </div>
+          <div class="preview-video-wrapper">
+            <video id="preview-video" autoplay muted playsinline></video>
+          </div>
+          <label for="display-name" class="field-label">Your name</label>
+          <input id="display-name" type="text" placeholder="Enter your name" class="text-input">
+          <div class="preview-controls">
+            <button class="ghost pill-btn" id="toggle-mic">Mute preview</button>
+            <button class="ghost pill-btn" id="toggle-camera">Hide camera</button>
+            <button class="primary" id="join-btn">Join class</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="lobby-view" class="hidden">
+      <div class="status-card">
+        <div class="status-indicator waiting"></div>
+        <h2>Waiting room</h2>
+        <p id="waiting-message">Waiting for the host to let you in…</p>
+      </div>
+    </section>
+
+    <section id="host-lobby" class="hidden">
+      <div class="host-lobby-card">
+        <header>
+          <div>
+            <h2>Lobby</h2>
+            <p>Review requests before starting.</p>
+          </div>
+          <button id="start-btn" class="primary">Start class</button>
+        </header>
+        <ul id="lobby-list" class="lobby-list"></ul>
+      </div>
+    </section>
+
+    <section id="live-view" class="hidden">
+      <div class="meeting-shell">
+        <header class="meeting-header">
+          <div class="meeting-heading">
+            <h2 id="live-meeting-title">Live class</h2>
+            <p>Code <span id="live-meeting-code" class="mono">—</span></p>
+          </div>
+          <div class="header-meta">
+            <button id="toggle-chat" class="icon-btn" aria-pressed="false" title="Toggle chat">
+              <span aria-hidden="true">💬</span>
+              <span class="label">Chat</span>
+            </button>
+            <button id="toggle-participants" class="icon-btn" aria-pressed="false" title="Toggle participants">
+              <span aria-hidden="true">👥</span>
+              <span class="label">Participants</span>
+            </button>
+            <button class="ghost" id="share-info">Copy invite</button>
+            <span class="status-dot live">Live</span>
+          </div>
+        </header>
+        <div id="connection-banner" class="connection-banner hidden" role="status"></div>
+        <div class="meeting-body">
+          <div class="stage">
+            <div class="stage-main" id="stage-main">
+              <video id="primary-video" autoplay playsinline></video>
+              <div class="stage-overlay">
+                <span id="primary-label">Connecting…</span>
+              </div>
+              <canvas id="whiteboard-canvas" class="whiteboard hidden" width="960" height="540"></canvas>
+            </div>
+            <div id="pip-container" class="stage-pip hidden">
+              <video id="pip-video" autoplay muted playsinline></video>
+              <span id="pip-label"></span>
+            </div>
+            <div id="participant-strip" class="participant-strip"></div>
+            <div class="stage-zoom">
+              <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+              <button id="zoom-reset" type="button" aria-label="Reset zoom">100%</button>
+              <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+            </div>
+          </div>
+        </div>
+        <div id="chat-drawer" class="side-drawer hidden" aria-hidden="true">
+          <div class="drawer-header">
+            <h3>Chat</h3>
+            <button id="chat-close" class="ghost small" type="button">Close</button>
+          </div>
+          <div id="chat-messages" class="chat-messages"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-text" type="text" placeholder="Send a message" autocomplete="off">
+          </form>
+        </div>
+        <div id="participants-drawer" class="side-drawer hidden" aria-hidden="true">
+          <div class="drawer-header">
+            <h3>Participants</h3>
+            <button id="participants-close" class="ghost small" type="button">Close</button>
+          </div>
+          <section id="live-lobby-card" class="lobby-card hidden">
+            <header>
+              <h4>Waiting to join</h4>
+              <span id="live-lobby-count" class="badge">0</span>
+            </header>
+            <ul id="live-lobby-list"></ul>
+          </section>
+          <ul id="participants-list" class="participants"></ul>
+          <div id="raised-hands" class="raised-hands hidden">
+            <h4>Hands raised</h4>
+            <ul id="raised-hands-list"></ul>
+          </div>
+        </div>
+        <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
+        <div id="utility-panel" class="utility-panel hidden">
+          <div class="utility-header">
+            <div>
+              <h3>Class tools</h3>
+              <p>Whiteboard, polls, Q&amp;A &amp; recording</p>
+            </div>
+            <button id="utility-close" class="ghost small">Close</button>
+          </div>
+          <div class="utility-tabs">
+            <button class="utility-tab active" data-tab="whiteboard">Whiteboard</button>
+            <button class="utility-tab" data-tab="polls">Polls</button>
+            <button class="utility-tab" data-tab="qna">Q&amp;A</button>
+            <button class="utility-tab" data-tab="recording">Recording</button>
+          </div>
+          <div class="utility-content">
+            <section class="utility-pane" data-pane="whiteboard">
+              <div class="whiteboard-toolbar">
+                <span>Draw in real-time.</span>
+                <div>
+                  <input type="color" id="whiteboard-color" value="#1e3a8a">
+                  <input type="range" id="whiteboard-size" min="2" max="12" value="4">
+                  <button id="whiteboard-clear" class="ghost small">Clear</button>
+                </div>
+              </div>
+              <div class="whiteboard-info">Host drawings sync live. Students view only.</div>
+            </section>
+            <section class="utility-pane hidden" data-pane="polls">
+              <div id="polls-wrapper">
+                <form id="poll-create-form" class="panel-card hidden">
+                  <label for="poll-question">Question</label>
+                  <input id="poll-question" type="text" placeholder="Ask a question">
+                  <label for="poll-options">Options (one per line)</label>
+                  <textarea id="poll-options" rows="4" placeholder="Option A&#10;Option B"></textarea>
+                  <label class="checkbox-row" for="poll-multiple">
+                    <input type="checkbox" id="poll-multiple">
+                    <span>Allow multiple answers</span>
+                  </label>
+                  <button type="submit" class="primary small">Launch poll</button>
+                </form>
+                <div id="poll-active" class="panel-card hidden">
+                  <header>
+                    <h4 id="poll-active-question">Poll</h4>
+                    <button id="poll-close" class="ghost small hidden">End poll</button>
+                  </header>
+                  <ul id="poll-options-list"></ul>
+                </div>
+                <div id="poll-history" class="panel-card hidden">
+                  <h4>Previous polls</h4>
+                  <ul id="poll-history-list"></ul>
+                </div>
+              </div>
+            </section>
+            <section class="utility-pane hidden" data-pane="qna">
+              <form id="qna-form" class="panel-card">
+                <label for="qna-input">Ask the host</label>
+                <input id="qna-input" type="text" placeholder="Type your question" autocomplete="off">
+              </form>
+              <div class="panel-card">
+                <h4>Questions</h4>
+                <ul id="qna-list"></ul>
+              </div>
+            </section>
+            <section class="utility-pane hidden" data-pane="recording">
+              <div class="panel-card">
+                <div id="recording-status" class="recording-status">Recording inactive</div>
+                <div class="recording-actions">
+                  <button id="recording-start" class="primary small">Start recording</button>
+                  <button id="recording-stop" class="ghost small">Stop recording</button>
+                </div>
+                <div id="recording-link" class="recording-link hidden"></div>
+              </div>
+              <div id="recording-history" class="panel-card hidden">
+                <h4>Past recordings</h4>
+                <p id="recordings-empty" class="muted">No recordings yet.</p>
+                <ul id="recordings-list" class="recordings-list"></ul>
+              </div>
+            </section>
+          </div>
+        </div>
+        <footer class="meeting-controls">
+          <div id="host-controls" class="control-cluster">
+            <button id="live-mic-toggle" class="control-btn" data-icon="🎤">Mic</button>
+            <button id="live-camera-toggle" class="control-btn" data-icon="📷">Camera</button>
+            <button id="screen-share" class="control-btn" data-icon="🖥">Share</button>
+            <button id="screen-share-audio" class="control-btn ghost" data-icon="🔊" aria-pressed="false">System audio off</button>
+            <button id="options-toggle" class="control-btn" data-icon="✨">Tools</button>
+          </div>
+          <div class="control-cluster">
+            <button id="hand-raise-btn" class="control-btn ghost" data-icon="✋">Raise</button>
+            <button id="leave-btn" class="control-btn ghost" data-icon="🚪">Leave</button>
+            <button id="end-btn" class="control-btn danger ghost hidden" data-icon="⏹">End</button>
+          </div>
+        </footer>
+      </div>
+    </section>
+
+    <section id="ended-view" class="hidden">
+      <div class="status-card">
+        <div class="status-indicator ended"></div>
+        <h2>The class has ended</h2>
+        <a href="/" class="secondary">Return to dashboard</a>
+      </div>
+    </section>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/public/js/class.js" defer></script>
+</body>
+</html>
