@@ -34,7 +34,7 @@ app.set('views', path.join(__dirname, 'app/views'));
 app.set('view engine', 'ejs');
 app.use('/public', express.static(path.join(__dirname, 'app/public')));
 
-const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/video-streaming';
+const mongoUri = process.env.MONGO_URI || 'mongodb+srv://abnjain25:HelloVVD1@cluster0.wewp9ek.mongodb.net/videoStreaming?authSource=admin';
 mongoose
   .connect(mongoUri)
   .then(() => console.log('Connected to MongoDB'))
