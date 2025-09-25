@@ -8,6 +8,7 @@ const {
   startParticipantSession,
   endParticipantSession
 } = require('../utils/classState');
+const { postSystemMessage } = require('../services/chatService');
 
 const decodeToken = async (token) => {
   if (!token) return null;
@@ -106,20 +107,18 @@ module.exports = (io) => {
             const previousSession = Array.isArray(participantEntry.sessions)
               ? participantEntry.sessions[participantEntry.sessions.length - 1]
               : null;
-            const returning = !!previousSession?.leftAt;
             participantEntry.socketId = socket.id;
             if (!previousSession || previousSession.leftAt) {
               startParticipantSession(participantEntry);
             }
             await klass.save();
-
-            if (returning) {
+            if (klass.status === 'live') {
               io.to(klass.meetingCode).emit('participant:joined', {
                 classCode: klass.meetingCode,
                 participant: {
                   displayName: participantEntry.displayName,
                   token: participantEntry.token,
-                  mediaState: participantEntry.mediaState || { audio: true, video: true }
+                  mediaState: participantEntry.mediaState || { audio: false, video: false }
                 }
               });
             }
@@ -391,6 +390,9 @@ module.exports = (io) => {
           endParticipantSession(participant);
           await klass.save();
           io.to(classCode).emit('participant:disconnected', { joinToken: token });
+          if (!participant.expelledAt && participant.displayName) {
+            await postSystemMessage(klass, `${participant.displayName} left the class.`);
+          }
         }
       } catch (error) {
         console.error('disconnect error', error);

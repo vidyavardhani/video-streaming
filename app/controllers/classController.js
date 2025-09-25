@@ -9,8 +9,9 @@ const {
   endParticipantSession
 } = require('../utils/classState');
 const recordingService = require('../services/recordingService');
+const { postSystemMessage } = require('../services/chatService');
 
-const baseUrl = () => process.env.BASE_URL || 'http://64.227.152.29:5000';
+const baseUrl = () => process.env.BASE_URL || 'http://localhost:4000';
 
 const generateMeetingCode = () => {
   const digits = Math.floor(100000000 + Math.random() * 900000000).toString();
@@ -75,7 +76,7 @@ const publicClassShape = (klass) => {
       displayName: entry.displayName,
       token: entry.token,
       joinedAt: entry.joinedAt,
-      mediaState: entry.mediaState || { audio: true, video: true },
+      mediaState: entry.mediaState || { audio: false, video: false },
       handRaisedAt: entry.handRaisedAt,
       allowedToSpeakAt: entry.allowedToSpeakAt,
       sessions: entry.sessions || []
@@ -177,7 +178,7 @@ exports.end = async (req, res) => {
       participant.socketId = null;
       participant.handRaisedAt = null;
       participant.allowedToSpeakAt = null;
-      participant.mediaState = participant.mediaState || { audio: true, video: true };
+      participant.mediaState = participant.mediaState || { audio: false, video: false };
     });
 
     if (klass.recording?.isRecording) {
@@ -304,7 +305,7 @@ exports.admit = async (req, res) => {
       displayName: lobbyEntry.displayName,
       token: lobbyEntry.token,
       joinedAt: new Date(),
-      mediaState: { audio: true, video: true },
+      mediaState: { audio: false, video: false },
       sessions: [{ joinedAt: new Date() }]
     };
     klass.participants.push(participant);
@@ -335,6 +336,8 @@ exports.admit = async (req, res) => {
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
     }
+
+    await postSystemMessage(klass, `${participant.displayName} joined the class.`);
 
     return res.json({ message: 'Student admitted', participant: payload.participant });
   } catch (error) {
@@ -386,6 +389,12 @@ exports.remove = async (req, res) => {
       classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
+    }
+    if (removed.displayName) {
+      const message = participantIndex !== -1
+        ? `${removed.displayName} was removed from the class.`
+        : `${removed.displayName}'s request was removed.`;
+      await postSystemMessage(klass, message);
     }
 
     return res.json({ message: 'Participant removed' });

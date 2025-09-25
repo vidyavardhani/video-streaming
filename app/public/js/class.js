@@ -37,7 +37,10 @@
     raisedHands: new Map(),
     mediaStates: new Map(),
     handRaised: false,
-    previewReady: false
+    previewReady: false,
+    stageZoom: 1,
+    activeSpeaker: null,
+    speakerTimeout: null
   };
 
   const hostTrackRegistry = new WeakSet();
@@ -119,7 +122,11 @@
     recordingLink: document.getElementById('recording-link'),
     handRaiseBtn: document.getElementById('hand-raise-btn'),
     raisedHands: document.getElementById('raised-hands'),
-    raisedHandsList: document.getElementById('raised-hands-list')
+    raisedHandsList: document.getElementById('raised-hands-list'),
+    viewerOptionsToggle: document.getElementById('viewer-options-toggle'),
+    stageZoomIn: document.getElementById('stage-zoom-in'),
+    stageZoomOut: document.getElementById('stage-zoom-out'),
+    speakerBanner: document.getElementById('speaker-banner')
   };
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -461,12 +468,12 @@
 
   const applyMediaState = (token, mediaState = {}) => {
     state.mediaStates.set(token, {
-      audio: mediaState.audio !== false,
-      video: mediaState.video !== false
+      audio: mediaState.audio === true,
+      video: mediaState.video === true
     });
   };
 
-  const getMediaState = (token) => state.mediaStates.get(token) || { audio: true, video: true };
+  const getMediaState = (token) => state.mediaStates.get(token) || { audio: false, video: false };
 
   const setUtilityTab = (tab) => {
     state.utilityTab = tab;
@@ -758,6 +765,18 @@
           actions.appendChild(allow);
         }
 
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'ghost small danger';
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', () => {
+          const confirmed = window.confirm(`Remove ${participant.displayName} from the class?`);
+          if (confirmed) {
+            removeParticipant(participant.token);
+          }
+        });
+        actions.appendChild(removeBtn);
+
         li.appendChild(actions);
       }
 
@@ -890,6 +909,35 @@
     }
   };
 
+  const hideSpeakerBanner = () => {
+    if (state.speakerTimeout) {
+      clearTimeout(state.speakerTimeout);
+      state.speakerTimeout = null;
+    }
+    state.activeSpeaker = null;
+    if (elements.speakerBanner) {
+      elements.speakerBanner.textContent = '';
+      elements.speakerBanner.classList.add('hidden');
+      delete elements.speakerBanner.dataset.kind;
+    }
+  };
+
+  const showSpeakerBanner = (token, reason = 'audio') => {
+    if (!elements.speakerBanner || !token) return;
+    const name = getNameByToken(token);
+    const label = reason === 'screen'
+      ? `${name} is presenting`
+      : `${name} has the mic`;
+    elements.speakerBanner.textContent = label;
+    elements.speakerBanner.dataset.kind = reason;
+    elements.speakerBanner.classList.remove('hidden');
+    state.activeSpeaker = token;
+    if (state.speakerTimeout) {
+      clearTimeout(state.speakerTimeout);
+    }
+    state.speakerTimeout = window.setTimeout(() => hideSpeakerBanner(), 8000);
+  };
+
   const detectScreenTrack = (stream) => {
     const [track] = stream.getVideoTracks();
     if (!track) return false;
@@ -909,6 +957,9 @@
   const handleHostMediaTrack = (type, stream) => {
     const key = type === 'screen' ? 'screen' : 'camera';
     state.hostMedia[key] = stream;
+    if (type === 'screen' && !state.isHost) {
+      showSpeakerBanner('host', 'screen');
+    }
     stream.getVideoTracks().forEach((track) => {
       if (hostTrackRegistry.has(track)) {
         return;
@@ -923,6 +974,9 @@
           state.hostMedia[key] = null;
         }
         refreshStage();
+        if (state.activeSpeaker === 'host') {
+          hideSpeakerBanner();
+        }
       };
       track.addEventListener('mute', updateStage);
       track.addEventListener('unmute', updateStage);
@@ -935,6 +989,11 @@
     const videoEl = ensureParticipantTile(id, label);
     if (!videoEl) return;
     setVideoSource(videoEl, stream, id === state.joinToken);
+    const wrapper = state.videos.get(id);
+    if (wrapper) {
+      const hasVideoTrack = stream.getVideoTracks().some((track) => track.readyState === 'live');
+      wrapper.classList.toggle('audio-only', !hasVideoTrack);
+    }
   };
 
   const getNameByToken = (token) => {
@@ -964,17 +1023,7 @@
   };
 
   const setupPreview = async () => {
-    if (state.previewReady && (state.isHost ? !!state.localStream : true)) {
-      return;
-    }
-
-    if (!state.isHost) {
-      state.previewReady = true;
-      if (elements.previewVideo) {
-        elements.previewVideo.srcObject = null;
-      }
-      refreshStage();
-      syncTrackButtons();
+    if (state.previewReady && state.localStream) {
       return;
     }
 
@@ -982,6 +1031,11 @@
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       state.localStream = stream;
       state.previewReady = true;
+      if (!state.isHost) {
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
       if (elements.previewVideo) {
         setVideoSource(elements.previewVideo, stream, true);
       }
@@ -1085,6 +1139,10 @@
             state.classInfo.status = response.classStatus;
           }
           state.admitted = response.role === 'participant';
+          if (elements.viewerOptionsToggle) {
+            const showViewerTools = !state.isHost && state.admitted;
+            elements.viewerOptionsToggle.classList.toggle('hidden', !showViewerTools);
+          }
           refreshStage();
           updateHandRaiseButton();
           if (response.classStatus === 'ended') {
@@ -1101,11 +1159,17 @@
             }
           } else if (state.admitted && state.classInfo.status === 'live') {
             setView('liveView');
+            if (!state.isHost) {
+              muteLocalTracks();
+            }
             beginCall();
           } else if (state.admitted) {
             setView('lobbyView');
             if (elements.waitingMessage) {
               elements.waitingMessage.textContent = 'Waiting for the host to start the class…';
+            }
+            if (!state.isHost) {
+              muteLocalTracks();
             }
           }
           emitMediaUpdate();
@@ -1122,6 +1186,9 @@
     state.socket.on('participant:approved', ({ participant, classStatus }) => {
       if (participant?.token && participant.token === state.joinToken) {
         state.admitted = true;
+        if (elements.viewerOptionsToggle) {
+          elements.viewerOptionsToggle.classList.toggle('hidden', state.isHost);
+        }
         if (classStatus) {
           state.classInfo.status = classStatus;
         }
@@ -1136,6 +1203,9 @@
         renderParticipants();
         if (state.classInfo.status === 'live') {
           setView('liveView');
+          if (!state.isHost) {
+            muteLocalTracks();
+          }
           beginCall();
           if (elements.waitingMessage) {
             elements.waitingMessage.textContent = 'Joining the class…';
@@ -1144,6 +1214,9 @@
           setView('lobbyView');
           if (elements.waitingMessage) {
             elements.waitingMessage.textContent = 'Waiting for the host to start the class…';
+          }
+          if (!state.isHost) {
+            muteLocalTracks();
           }
         }
         state.handRaised = false;
@@ -1177,6 +1250,7 @@
         state.joinToken = null;
         state.handRaised = false;
         updateHandRaiseButton();
+        elements.viewerOptionsToggle?.classList.add('hidden');
         if (!state.isHost && state.socket) {
           state.socket.disconnect();
           state.socket = null;
@@ -1196,6 +1270,9 @@
       removeVideoEl(joinToken);
       state.peers.delete(joinToken);
       state.screenSenders = state.screenSenders.filter(({ token }) => token !== joinToken);
+      if (state.activeSpeaker === joinToken) {
+        hideSpeakerBanner();
+      }
     });
 
     state.socket.on('participant:disconnected', ({ joinToken }) => {
@@ -1208,6 +1285,9 @@
       removeVideoEl(joinToken);
       state.peers.delete(joinToken);
       state.screenSenders = state.screenSenders.filter(({ token }) => token !== joinToken);
+      if (state.activeSpeaker === joinToken) {
+        hideSpeakerBanner();
+      }
     });
 
     state.socket.on('class:started', () => {
@@ -1221,6 +1301,9 @@
         setView('liveView');
       } else if (state.admitted) {
         setView('liveView');
+        if (!state.isHost) {
+          muteLocalTracks();
+        }
         beginCall();
       }
       refreshStage();
@@ -1230,8 +1313,10 @@
       if (state.classInfo) {
         state.classInfo.status = 'ended';
       }
+      hideSpeakerBanner();
       leaveSession();
       setView('endedView');
+      elements.viewerOptionsToggle?.classList.add('hidden');
       sessionStorage.removeItem(joinKey);
       state.joinToken = null;
       state.admitted = false;
@@ -1253,6 +1338,13 @@
       applyMediaState(joinToken, mediaState);
       updateParticipantState(joinToken, { mediaState });
       renderParticipants();
+      const media = getMediaState(joinToken);
+      if (media.audio && media.video === false) {
+        showSpeakerBanner(joinToken);
+      }
+      if ((!media.audio || media.video) && state.activeSpeaker === joinToken) {
+        hideSpeakerBanner();
+      }
     });
 
     state.socket.on('hand:raised', ({ joinToken, name, handRaisedAt }) => {
@@ -1373,6 +1465,8 @@
       (state.classInfo.participants || []).forEach((p) => {
         createPeerConnection(p.token, true);
       });
+    } else {
+      createPeerConnection('host', true);
     }
   };
 
@@ -1388,6 +1482,7 @@
     state.activeDrawer = null;
     syncDrawerState();
     refreshStage();
+    hideSpeakerBanner();
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -1400,11 +1495,10 @@
       state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
     }
     if (state.isHost && state.screenStream) {
-      const [screenTrack] = state.screenStream.getVideoTracks();
-      if (screenTrack) {
-        const sender = pc.addTrack(screenTrack, state.screenStream);
-        state.screenSenders.push({ pc, sender, token: targetToken });
-      }
+      state.screenStream.getTracks().forEach((track) => {
+        const sender = pc.addTrack(track, state.screenStream);
+        state.screenSenders.push({ pc, sender, token: targetToken, track });
+      });
     }
 
     pc.onicecandidate = (event) => {
@@ -1435,14 +1529,72 @@
       }
     };
 
-    pc.onconnectionstatechange = () => {
-      if (['failed', 'closed'].includes(pc.connectionState)) {
-        removeVideoEl(targetToken);
-        state.peers.delete(targetToken);
-        if (targetToken === 'host' && !state.isHost) {
-          state.hostMedia = { camera: null, screen: null };
-          refreshStage();
+    const teardownPeer = () => {
+      removeVideoEl(targetToken);
+      state.peers.delete(targetToken);
+      if (targetToken === 'host' && !state.isHost) {
+        state.hostMedia = { camera: null, screen: null };
+        refreshStage();
+      }
+      if (state.activeSpeaker === targetToken) {
+        hideSpeakerBanner();
+      }
+    };
+
+    const scheduleRecovery = () => {
+      setTimeout(() => {
+        if (pc.connectionState === 'disconnected') {
+          if (typeof pc.restartIce === 'function') {
+            try {
+              pc.restartIce();
+            } catch (error) {
+              console.warn('ICE restart failed', error);
+            }
+          }
+          renegotiate(pc, targetToken);
         }
+      }, 750);
+    };
+
+    pc.onconnectionstatechange = () => {
+      const stateValue = pc.connectionState;
+      if (stateValue === 'disconnected') {
+        scheduleRecovery();
+      }
+      if (stateValue === 'failed') {
+        if (typeof pc.restartIce === 'function') {
+          try {
+            pc.restartIce();
+          } catch (error) {
+            console.warn('ICE restart error', error);
+          }
+        }
+        renegotiate(pc, targetToken);
+        setTimeout(() => {
+          if (pc.connectionState === 'failed') {
+            teardownPeer();
+          }
+        }, 4000);
+      }
+      if (stateValue === 'closed') {
+        teardownPeer();
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      const stateValue = pc.iceConnectionState;
+      if (stateValue === 'disconnected') {
+        scheduleRecovery();
+      }
+      if (stateValue === 'failed') {
+        if (typeof pc.restartIce === 'function') {
+          try {
+            pc.restartIce();
+          } catch (error) {
+            console.warn('ICE restart error', error);
+          }
+        }
+        renegotiate(pc, targetToken);
       }
     };
 
@@ -1516,6 +1668,23 @@
 
   const appendMessage = (message) => {
     if (!message) return;
+    if (message.system) {
+      const item = document.createElement('div');
+      item.className = 'chat-item system';
+      const text = document.createElement('span');
+      text.className = 'chat-system-text';
+      text.textContent = message.message;
+      item.appendChild(text);
+      if (message.createdAt) {
+        const time = document.createElement('span');
+        time.className = 'chat-system-time';
+        time.textContent = formatTime(message.createdAt);
+        item.appendChild(time);
+      }
+      elements.chatMessages.appendChild(item);
+      elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+      return;
+    }
     const wrapper = document.createElement('div');
     wrapper.className = 'chat-item';
     if (message._id) {
@@ -1630,12 +1799,16 @@
   });
 
   elements.endButton?.addEventListener('click', async () => {
+    const confirmed = window.confirm('End the class for everyone?');
+    if (!confirmed) return;
     await fetch(`/classes/${classCode}/end`, { method: 'PATCH' });
     leaveSession();
     setView('endedView');
   });
 
   elements.leaveBtn?.addEventListener('click', () => {
+    const confirmed = window.confirm('Leave the class?');
+    if (!confirmed) return;
     leaveSession();
     if (!state.isHost && state.socket) {
       state.socket.disconnect();
@@ -1644,6 +1817,7 @@
     sessionStorage.removeItem(joinKey);
     state.joinToken = null;
     setView('joinView');
+    elements.viewerOptionsToggle?.classList.add('hidden');
   });
 
   elements.copyLink?.addEventListener('click', async (e) => {
@@ -1669,6 +1843,7 @@
   });
 
   elements.utilityToggle?.addEventListener('click', () => toggleUtilityPanel());
+  elements.viewerOptionsToggle?.addEventListener('click', () => toggleUtilityPanel());
   elements.utilityClose?.addEventListener('click', () => toggleUtilityPanel(false));
   elements.utilityTabs?.forEach((tab) => {
     tab.addEventListener('click', () => {
@@ -1825,6 +2000,20 @@
     state.socket.emit('media:update', { audio: audioEnabled, video: videoEnabled });
   };
 
+  const setTracksEnabled = (tracks, enabled) => {
+    tracks.forEach((track) => {
+      track.enabled = enabled;
+    });
+  };
+
+  const muteLocalTracks = () => {
+    if (!state.localStream) return;
+    setTracksEnabled(state.localStream.getAudioTracks(), false);
+    setTracksEnabled(state.localStream.getVideoTracks(), false);
+    syncTrackButtons();
+    emitMediaUpdate();
+  };
+
   const applyHostMediaState = (media) => {
     if (!state.localStream || !media) return;
     if (typeof media.audio === 'boolean') {
@@ -1840,6 +2029,14 @@
     }
     syncTrackButtons();
     emitMediaUpdate();
+    const audioEnabled = !!state.localStream.getAudioTracks().some((track) => track.enabled);
+    const videoEnabled = !!state.localStream.getVideoTracks().some((track) => track.enabled);
+    if (audioEnabled && !videoEnabled) {
+      showSpeakerBanner(state.joinToken);
+    }
+    if ((!audioEnabled || videoEnabled) && state.activeSpeaker === state.joinToken) {
+      hideSpeakerBanner();
+    }
   };
 
   const toggleTrack = (kind) => {
@@ -1873,6 +2070,22 @@
     if (elements.screenShareBtn) {
       elements.screenShareBtn.textContent = 'Share screen';
     }
+    if (state.activeSpeaker === 'host') {
+      hideSpeakerBanner();
+    }
+  };
+
+  const setStageZoom = (value) => {
+    const min = 0.8;
+    const max = 1.8;
+    state.stageZoom = Math.min(Math.max(value, min), max);
+    document.documentElement.style.setProperty('--stage-zoom', state.stageZoom.toFixed(2));
+    if (elements.stageZoomOut) {
+      elements.stageZoomOut.disabled = state.stageZoom <= min;
+    }
+    if (elements.stageZoomIn) {
+      elements.stageZoomIn.disabled = state.stageZoom >= max;
+    }
   };
 
   const bindTrackToggles = () => {
@@ -1890,25 +2103,40 @@
       return;
     }
     try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
       state.screenStream = displayStream;
       refreshStage();
-      const [screenTrack] = displayStream.getVideoTracks();
       state.screenSenders = [];
+      const tracks = displayStream.getTracks();
       state.peers.forEach((pc, token) => {
-        const sender = pc.addTrack(screenTrack, displayStream);
-        state.screenSenders.push({ pc, sender, token });
+        tracks.forEach((track) => {
+          const sender = pc.addTrack(track, displayStream);
+          state.screenSenders.push({ pc, sender, token, track });
+        });
         renegotiate(pc, token);
       });
       if (elements.screenShareBtn) {
         elements.screenShareBtn.textContent = 'Stop sharing';
       }
-      screenTrack.onended = () => {
-        stopScreenShare();
-      };
+      displayStream.getTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+          stopScreenShare();
+        });
+      });
     } catch (error) {
       console.error('Screen share error', error);
     }
+  });
+
+  elements.stageZoomIn?.addEventListener('click', () => {
+    setStageZoom(state.stageZoom + 0.1);
+  });
+
+  elements.stageZoomOut?.addEventListener('click', () => {
+    setStageZoom(state.stageZoom - 0.1);
   });
 
   elements.chatToggle?.addEventListener('click', () => toggleDrawer('chat'));
@@ -1927,6 +2155,7 @@
     await loadUser();
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
     syncDrawerState();
+    setStageZoom(1);
     document.body.classList.toggle('is-host', !!state.isHost);
     document.body.classList.toggle('is-student', !state.isHost);
     if (!state.isHost && elements.participantStrip) {

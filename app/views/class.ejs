@@ -85,12 +85,15 @@
         </header>
         <div class="meeting-body">
           <div class="stage">
+           
             <div class="stage-main" id="stage-main">
               <video id="primary-video" autoplay playsinline></video>
+              <div class="stage-live-watermark"><img src="https://vvdlive.com/logo.svg" width="200px"></div>
               <div class="stage-overlay">
                 <span id="primary-label">Connecting…</span>
               </div>
               <canvas id="whiteboard-canvas" class="whiteboard hidden" width="960" height="540"></canvas>
+              <div id="speaker-banner" class="speaker-banner hidden"></div>
             </div>
             <div id="pip-container" class="stage-pip hidden">
               <video id="pip-video" autoplay muted playsinline></video>
@@ -206,9 +209,14 @@
             <button id="options-toggle" class="control-btn" data-icon="✨">Tools</button>
           </div>
           <div class="control-cluster">
+            <button id="viewer-options-toggle" class="control-btn ghost hidden" data-icon="✨">Tools</button>
             <button id="hand-raise-btn" class="control-btn ghost" data-icon="✋">Raise</button>
             <button id="leave-btn" class="control-btn ghost" data-icon="🚪">Leave</button>
             <button id="end-btn" class="control-btn danger ghost hidden" data-icon="⏹">End</button>
+          </div>
+          <div class="control-cluster stage-zoom-controls">
+            <button id="stage-zoom-out" class="control-btn ghost" data-icon="➖" title="Zoom out">Zoom out</button>
+            <button id="stage-zoom-in" class="control-btn ghost" data-icon="➕" title="Zoom in">Zoom in</button>
           </div>
         </footer>
       </div>
