@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teacher Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/public/css/style.css">
+</head>
+<body>
+  <main class="container">
+    <header style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+      <div>
+        <h1>Hello, <%= user.name %></h1>
+        <p class="tag">Manage your live classes from here</p>
+      </div>
+      <form action="/auth/logout" method="post">
+        <button type="submit" class="ghost">Logout</button>
+      </form>
+    </header>
+
+    <section class="dashboard-grid" id="dashboard">
+      <section class="card">
+        <h2>Create a new class</h2>
+        <form id="create-class-form">
+          <label for="title">Class title</label>
+          <input type="text" id="title" name="title" required placeholder="Physics - Chapter 5">
+          <button type="submit" class="primary">Create class</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Your classes</h2>
+        <p id="no-classes" class="hidden" style="color: var(--muted);">No classes yet. Create one to get started.</p>
+        <ul id="class-list" class="class-list"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Recent recordings</h2>
+        <p id="no-recordings" class="muted">No recordings yet.</p>
+        <ul id="recording-list" class="dashboard-recordings"></ul>
+      </section>
+    </section>
+  </main>
+  <script src="/public/js/dashboard.js" defer></script>
+</body>
+</html>
