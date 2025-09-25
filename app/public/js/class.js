@@ -5,12 +5,75 @@
   const classCode = root.dataset.classCode;
   const tokenKey = 'vs_token';
   const joinKey = `vs_join_${classCode}`;
+  const displayNameKey = `vs_name_${classCode}`;
+
+  const safeStorage = (type) => {
+    try {
+      return window[type];
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const storage = {
+    session: safeStorage('sessionStorage'),
+    local: safeStorage('localStorage')
+  };
+
+  const storageGet = (store, key) => {
+    if (!store || !key) return null;
+    try {
+      return store.getItem(key);
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const storageSet = (store, key, value) => {
+    if (!store || !key) return;
+    try {
+      store.setItem(key, value);
+    } catch (error) {
+      /* ignore storage errors */
+    }
+  };
+
+  const storageRemove = (store, key) => {
+    if (!store || !key) return;
+    try {
+      store.removeItem(key);
+    } catch (error) {
+      /* ignore storage errors */
+    }
+  };
+
+  const getStoredJoinToken = () =>
+    storageGet(storage.session, joinKey) || storageGet(storage.local, joinKey) || null;
+
+  const persistJoinToken = (token) => {
+    if (!token) return;
+    storageSet(storage.session, joinKey, token);
+    storageSet(storage.local, joinKey, token);
+  };
+
+  const clearJoinToken = () => {
+    storageRemove(storage.session, joinKey);
+    storageRemove(storage.local, joinKey);
+  };
+
+  const getStoredDisplayName = () => storageGet(storage.local, displayNameKey) || '';
+
+  const persistDisplayName = (name) => {
+    if (!name) return;
+    storageSet(storage.local, displayNameKey, name);
+  };
 
   const state = {
     socket: null,
     classInfo: null,
     user: null,
-    joinToken: sessionStorage.getItem(joinKey) || null,
+    joinToken: getStoredJoinToken(),
+    savedDisplayName: getStoredDisplayName(),
     isHost: false,
     admitted: false,
     localStream: null,
@@ -40,7 +103,8 @@
     previewReady: false,
     stageZoom: 1,
     activeSpeaker: null,
-    speakerTimeout: null
+    speakerTimeout: null,
+    canUseMedia: { audio: false, video: false }
   };
 
   const hostTrackRegistry = new WeakSet();
@@ -100,7 +164,6 @@
     whiteboardColor: document.getElementById('whiteboard-color'),
     whiteboardSize: document.getElementById('whiteboard-size'),
     utilityPanel: document.getElementById('utility-panel'),
-    utilityToggle: document.getElementById('options-toggle'),
     utilityClose: document.getElementById('utility-close'),
     utilityTabs: document.querySelectorAll('.utility-tab'),
     utilityPanes: document.querySelectorAll('.utility-pane'),
@@ -123,7 +186,11 @@
     handRaiseBtn: document.getElementById('hand-raise-btn'),
     raisedHands: document.getElementById('raised-hands'),
     raisedHandsList: document.getElementById('raised-hands-list'),
-    viewerOptionsToggle: document.getElementById('viewer-options-toggle'),
+    viewerMicToggle: document.getElementById('viewer-mic-toggle'),
+    viewerCameraToggle: document.getElementById('viewer-camera-toggle'),
+    controlPolls: document.getElementById('control-polls'),
+    controlRecording: document.getElementById('control-recording'),
+    controlWhiteboard: document.getElementById('control-whiteboard'),
     stageZoomIn: document.getElementById('stage-zoom-in'),
     stageZoomOut: document.getElementById('stage-zoom-out'),
     speakerBanner: document.getElementById('speaker-banner')
@@ -131,7 +198,7 @@
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-  const getStoredToken = () => window.localStorage.getItem(tokenKey);
+  const getStoredToken = () => storageGet(storage.local, tokenKey);
 
   const toInitials = (name = '') => {
     const letters = name
@@ -509,13 +576,27 @@
     }
   };
 
+  const openUtilityPanel = (tab) => {
+    if (typeof tab === 'string') {
+      setUtilityTab(tab);
+    }
+    toggleUtilityPanel(true);
+  };
+
   const updateHandRaiseButton = () => {
     if (!elements.handRaiseBtn) return;
     elements.handRaiseBtn.classList.toggle('hidden', state.isHost);
     if (state.isHost) return;
     const canRaise = state.admitted && state.classInfo?.status === 'live';
     elements.handRaiseBtn.disabled = !canRaise;
-    elements.handRaiseBtn.textContent = state.handRaised ? 'Lower hand' : 'Raise hand';
+    const labelNode = elements.handRaiseBtn.querySelector('.label');
+    const nextLabel = state.handRaised ? 'Lower hand' : 'Raise hand';
+    if (labelNode) {
+      labelNode.textContent = nextLabel;
+    } else {
+      elements.handRaiseBtn.textContent = nextLabel;
+    }
+    elements.handRaiseBtn.setAttribute('aria-pressed', state.handRaised.toString());
   };
 
   const toggleHandRaise = () => {
@@ -1123,7 +1204,7 @@
           }
           if (response.joinToken) {
             state.joinToken = response.joinToken;
-            sessionStorage.setItem(joinKey, state.joinToken);
+            persistJoinToken(state.joinToken);
           }
           state.isHost = response.role === 'host';
           if (elements.hostControls) {
@@ -1135,13 +1216,24 @@
           if (elements.endButton) {
             elements.endButton.classList.toggle('hidden', !state.isHost);
           }
+          if (!state.isHost && response.name) {
+            persistDisplayName(response.name);
+            state.savedDisplayName = response.name;
+            if (elements.nameInput) {
+              elements.nameInput.value = response.name;
+            }
+          }
           if (response.classStatus) {
             state.classInfo.status = response.classStatus;
           }
           state.admitted = response.role === 'participant';
-          if (elements.viewerOptionsToggle) {
-            const showViewerTools = !state.isHost && state.admitted;
-            elements.viewerOptionsToggle.classList.toggle('hidden', !showViewerTools);
+          if (!state.isHost) {
+            const selfMedia = getMediaState(state.joinToken);
+            state.canUseMedia = {
+              audio: selfMedia.audio === true,
+              video: selfMedia.video === true
+            };
+            updateViewerMediaControls();
           }
           refreshStage();
           updateHandRaiseButton();
@@ -1185,10 +1277,9 @@
 
     state.socket.on('participant:approved', ({ participant, classStatus }) => {
       if (participant?.token && participant.token === state.joinToken) {
+        state.joinToken = participant.token;
+        persistJoinToken(participant.token);
         state.admitted = true;
-        if (elements.viewerOptionsToggle) {
-          elements.viewerOptionsToggle.classList.toggle('hidden', state.isHost);
-        }
         if (classStatus) {
           state.classInfo.status = classStatus;
         }
@@ -1199,8 +1290,13 @@
         } else {
           state.classInfo.participants.push(participant);
         }
+        state.canUseMedia = {
+          audio: participant.mediaState?.audio === true,
+          video: participant.mediaState?.video === true
+        };
         applyMediaState(participant.token, participant.mediaState);
         renderParticipants();
+        updateViewerMediaControls();
         if (state.classInfo.status === 'live') {
           setView('liveView');
           if (!state.isHost) {
@@ -1221,6 +1317,7 @@
         }
         state.handRaised = false;
         updateHandRaiseButton();
+        updateViewerMediaControls();
       }
     });
 
@@ -1246,11 +1343,10 @@
         setView('joinView');
         state.admitted = false;
         elements.waitingMessage.textContent = 'Removed by host';
-        sessionStorage.removeItem(joinKey);
+        clearJoinToken();
         state.joinToken = null;
         state.handRaised = false;
         updateHandRaiseButton();
-        elements.viewerOptionsToggle?.classList.add('hidden');
         if (!state.isHost && state.socket) {
           state.socket.disconnect();
           state.socket = null;
@@ -1316,8 +1412,7 @@
       hideSpeakerBanner();
       leaveSession();
       setView('endedView');
-      elements.viewerOptionsToggle?.classList.add('hidden');
-      sessionStorage.removeItem(joinKey);
+      clearJoinToken();
       state.joinToken = null;
       state.admitted = false;
       state.handRaised = false;
@@ -1339,6 +1434,15 @@
       updateParticipantState(joinToken, { mediaState });
       renderParticipants();
       const media = getMediaState(joinToken);
+      if (joinToken === state.joinToken && !state.isHost) {
+        if (mediaState && typeof mediaState.audio === 'boolean') {
+          state.canUseMedia.audio = mediaState.audio !== false;
+        }
+        if (mediaState && typeof mediaState.video === 'boolean') {
+          state.canUseMedia.video = mediaState.video !== false;
+        }
+        updateViewerMediaControls();
+      }
       if (media.audio && media.video === false) {
         showSpeakerBanner(joinToken);
       }
@@ -1363,7 +1467,10 @@
       renderParticipants();
       if (joinToken === state.joinToken) {
         state.handRaised = false;
+        state.canUseMedia = { audio: false, video: false };
+        muteLocalTracks();
         updateHandRaiseButton();
+        updateViewerMediaControls();
       }
     });
 
@@ -1373,19 +1480,32 @@
       renderParticipants();
       if (joinToken === state.joinToken) {
         state.handRaised = false;
+        state.canUseMedia = { audio: true, video: true };
         updateHandRaiseButton();
+        updateViewerMediaControls();
       }
     });
 
     state.socket.on('host:allow-speak', () => {
       state.handRaised = false;
+      state.canUseMedia = { audio: true, video: true };
       updateHandRaiseButton();
       applyHostMediaState({ audio: true });
+      updateViewerMediaControls();
       alert('The host allowed you to speak. Your microphone is enabled.');
     });
 
     state.socket.on('host:media', (mediaState) => {
       applyHostMediaState(mediaState);
+      if (!state.isHost && mediaState) {
+        if (typeof mediaState.audio === 'boolean') {
+          state.canUseMedia.audio = mediaState.audio !== false;
+        }
+        if (typeof mediaState.video === 'boolean') {
+          state.canUseMedia.video = mediaState.video !== false;
+        }
+        updateViewerMediaControls();
+      }
     });
 
     state.socket.on('whiteboard:stroke', (stroke) => {
@@ -1483,6 +1603,8 @@
     syncDrawerState();
     refreshStage();
     hideSpeakerBanner();
+    state.canUseMedia = { audio: false, video: false };
+    updateViewerMediaControls();
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -1763,12 +1885,57 @@
     });
   };
 
+  const autoJoinWithSavedName = async () => {
+    if (state.isHost || state.socket || state.joinToken) {
+      if (!state.joinToken && !state.savedDisplayName) {
+        setView('joinView');
+      }
+      return;
+    }
+    if (!state.savedDisplayName) {
+      setView('joinView');
+      return;
+    }
+    if (elements.nameInput) {
+      elements.nameInput.value = state.savedDisplayName;
+    }
+    try {
+      const res = await fetch(`/classes/${classCode}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: state.savedDisplayName })
+      });
+      if (!res.ok) {
+        throw new Error('Auto join failed');
+      }
+      const data = await res.json();
+      if (data.joinToken) {
+        state.joinToken = data.joinToken;
+        persistJoinToken(state.joinToken);
+      }
+      if (elements.waitingMessage) {
+        const waitingText = data.message?.toLowerCase().includes('waiting')
+          ? 'Waiting for the host to let you in…'
+          : 'Reconnecting to the class…';
+        elements.waitingMessage.textContent = waitingText;
+      }
+      setView('lobbyView');
+      connectSocket();
+      updateViewerMediaControls();
+    } catch (error) {
+      console.error('Auto join error', error);
+      setView('joinView');
+    }
+  };
+
   elements.joinButton?.addEventListener('click', async () => {
     const displayName = elements.nameInput.value.trim();
     if (!displayName) {
       alert('Enter your name');
       return;
     }
+    persistDisplayName(displayName);
+    state.savedDisplayName = displayName;
     const res = await fetch(`/classes/${classCode}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1781,7 +1948,7 @@
     }
     const data = await res.json();
     state.joinToken = data.joinToken;
-    sessionStorage.setItem(joinKey, state.joinToken);
+    persistJoinToken(state.joinToken);
     setView('lobbyView');
     connectSocket();
     elements.waitingMessage.textContent = 'Waiting for the host to let you in…';
@@ -1804,6 +1971,8 @@
     await fetch(`/classes/${classCode}/end`, { method: 'PATCH' });
     leaveSession();
     setView('endedView');
+    clearJoinToken();
+    state.joinToken = null;
   });
 
   elements.leaveBtn?.addEventListener('click', () => {
@@ -1814,10 +1983,9 @@
       state.socket.disconnect();
       state.socket = null;
     }
-    sessionStorage.removeItem(joinKey);
+    clearJoinToken();
     state.joinToken = null;
     setView('joinView');
-    elements.viewerOptionsToggle?.classList.add('hidden');
   });
 
   elements.copyLink?.addEventListener('click', async (e) => {
@@ -1842,8 +2010,19 @@
     setTimeout(() => (e.currentTarget.textContent = 'Copy invite'), 1500);
   });
 
-  elements.utilityToggle?.addEventListener('click', () => toggleUtilityPanel());
-  elements.viewerOptionsToggle?.addEventListener('click', () => toggleUtilityPanel());
+  elements.controlPolls?.addEventListener('click', () => {
+    openUtilityPanel('polls');
+  });
+
+  elements.controlRecording?.addEventListener('click', () => {
+    if (!state.isHost) return;
+    openUtilityPanel('recording');
+  });
+
+  elements.controlWhiteboard?.addEventListener('click', () => {
+    openUtilityPanel('whiteboard');
+  });
+
   elements.utilityClose?.addEventListener('click', () => toggleUtilityPanel(false));
   elements.utilityTabs?.forEach((tab) => {
     tab.addEventListener('click', () => {
@@ -1981,76 +2160,181 @@
   const setToggleState = (button, activeLabel, inactiveLabel, isActive) => {
     if (!button) return;
     button.classList.toggle('is-off', !isActive);
-    button.textContent = isActive ? activeLabel : inactiveLabel;
+    const labelNode = button.querySelector('.label');
+    if (labelNode) {
+      labelNode.textContent = isActive ? activeLabel : inactiveLabel;
+    } else {
+      button.textContent = isActive ? activeLabel : inactiveLabel;
+    }
+    if (typeof isActive === 'boolean') {
+      button.setAttribute('aria-pressed', isActive.toString());
+    }
   };
 
+  const setButtonLabel = (button, text) => {
+    if (!button) return;
+    const labelNode = button.querySelector('.label');
+    if (labelNode) {
+      labelNode.textContent = text;
+    } else {
+      button.textContent = text;
+    }
+  };
+
+  const updateViewerMediaControls = () => {
+    if (state.isHost) return;
+    const audioAllowed = !!state.canUseMedia?.audio;
+    const videoAllowed = !!state.canUseMedia?.video;
+    const audioEnabled = isTrackEnabled('audio');
+    const videoEnabled = isTrackEnabled('video');
+
+    if (elements.viewerMicToggle) {
+      elements.viewerMicToggle.disabled = !audioAllowed;
+      setToggleState(elements.viewerMicToggle, 'Mic on', 'Mic off', audioEnabled);
+      elements.viewerMicToggle.setAttribute(
+        'aria-label',
+        audioAllowed
+          ? audioEnabled
+            ? 'Turn microphone off'
+            : 'Turn microphone on'
+          : 'Microphone disabled by host'
+      );
+    }
+
+    if (elements.viewerCameraToggle) {
+      elements.viewerCameraToggle.disabled = !videoAllowed;
+      setToggleState(elements.viewerCameraToggle, 'Camera on', 'Camera off', videoEnabled);
+      elements.viewerCameraToggle.setAttribute(
+        'aria-label',
+        videoAllowed
+          ? videoEnabled
+            ? 'Turn camera off'
+            : 'Turn camera on'
+          : 'Camera disabled by host'
+      );
+    }
+  };
+
+  const isTrackEnabled = (kind) =>
+    !!state.localStream?.getTracks().some((track) => track.kind === kind && track.enabled);
+
   const syncTrackButtons = () => {
-    const audioEnabled = !!state.localStream?.getAudioTracks().some((track) => track.enabled);
-    const videoEnabled = !!state.localStream?.getVideoTracks().some((track) => track.enabled);
+    const audioEnabled = isTrackEnabled('audio');
+    const videoEnabled = isTrackEnabled('video');
     setToggleState(elements.muteBtn, 'Mic on', 'Mic off', audioEnabled);
     setToggleState(elements.liveMicToggle, 'Mic on', 'Mic off', audioEnabled);
     setToggleState(elements.cameraBtn, 'Camera on', 'Camera off', videoEnabled);
     setToggleState(elements.liveCameraToggle, 'Camera on', 'Camera off', videoEnabled);
+    updateViewerMediaControls();
   };
 
   const emitMediaUpdate = () => {
     if (!state.socket || !state.localStream) return;
-    const audioEnabled = !!state.localStream.getAudioTracks().some((track) => track.enabled);
-    const videoEnabled = !!state.localStream.getVideoTracks().some((track) => track.enabled);
+    const audioEnabled = isTrackEnabled('audio');
+    const videoEnabled = isTrackEnabled('video');
     state.socket.emit('media:update', { audio: audioEnabled, video: videoEnabled });
   };
 
-  const setTracksEnabled = (tracks, enabled) => {
-    tracks.forEach((track) => {
-      track.enabled = enabled;
+  const setMediaTrackState = (kind, enabled, options = {}) => {
+    if (!state.localStream || typeof enabled !== 'boolean') return false;
+    let changed = false;
+    state.localStream.getTracks().forEach((track) => {
+      if (track.kind === kind && track.enabled !== enabled) {
+        track.enabled = enabled;
+        changed = true;
+      }
     });
+    state.peers.forEach((pc) => {
+      pc.getSenders().forEach((sender) => {
+        if (sender.track && sender.track.kind === kind && sender.track.enabled !== enabled) {
+          sender.track.enabled = enabled;
+          changed = true;
+        }
+      });
+    });
+    if (kind === 'video' && !options.skipStage) {
+      refreshStage();
+    }
+    if (!options.skipButtons) {
+      syncTrackButtons();
+    }
+    if (!options.skipEmit && changed) {
+      emitMediaUpdate();
+    }
+    if (kind === 'audio' && !options.suppressBanner) {
+      const videoActive = isTrackEnabled('video');
+      if (enabled && !videoActive) {
+        showSpeakerBanner(state.joinToken);
+      } else if ((!enabled || videoActive) && state.activeSpeaker === state.joinToken) {
+        hideSpeakerBanner();
+      }
+    }
+    if (kind === 'video' && !options.suppressBanner) {
+      const audioActive = isTrackEnabled('audio');
+      if (!enabled && audioActive) {
+        showSpeakerBanner(state.joinToken);
+      }
+      if (enabled && state.activeSpeaker === state.joinToken) {
+        hideSpeakerBanner();
+      }
+    }
+    if (!state.isHost && !options.skipButtons) {
+      updateViewerMediaControls();
+    }
+    return changed;
   };
 
   const muteLocalTracks = () => {
     if (!state.localStream) return;
-    setTracksEnabled(state.localStream.getAudioTracks(), false);
-    setTracksEnabled(state.localStream.getVideoTracks(), false);
-    syncTrackButtons();
-    emitMediaUpdate();
+    const audioChanged = setMediaTrackState('audio', false, {
+      skipEmit: true,
+      suppressBanner: true,
+      skipButtons: true
+    });
+    const videoChanged = setMediaTrackState('video', false, {
+      skipEmit: true,
+      skipButtons: true
+    });
+    if (state.activeSpeaker === state.joinToken) {
+      hideSpeakerBanner();
+    }
+    if (audioChanged || videoChanged) {
+      syncTrackButtons();
+      emitMediaUpdate();
+    }
   };
 
   const applyHostMediaState = (media) => {
     if (!state.localStream || !media) return;
+    let shouldEmit = false;
     if (typeof media.audio === 'boolean') {
-      state.localStream.getAudioTracks().forEach((track) => {
-        track.enabled = media.audio;
-      });
+      shouldEmit = setMediaTrackState('audio', media.audio, {
+        suppressBanner: true,
+        skipEmit: true
+      }) || shouldEmit;
     }
     if (typeof media.video === 'boolean') {
-      state.localStream.getVideoTracks().forEach((track) => {
-        track.enabled = media.video;
-      });
-      refreshStage();
+      shouldEmit = setMediaTrackState('video', media.video, {
+        skipEmit: true
+      }) || shouldEmit;
     }
-    syncTrackButtons();
-    emitMediaUpdate();
-    const audioEnabled = !!state.localStream.getAudioTracks().some((track) => track.enabled);
-    const videoEnabled = !!state.localStream.getVideoTracks().some((track) => track.enabled);
+    const audioEnabled = isTrackEnabled('audio');
+    const videoEnabled = isTrackEnabled('video');
     if (audioEnabled && !videoEnabled) {
       showSpeakerBanner(state.joinToken);
     }
     if ((!audioEnabled || videoEnabled) && state.activeSpeaker === state.joinToken) {
       hideSpeakerBanner();
     }
+    if (shouldEmit) {
+      emitMediaUpdate();
+    }
   };
 
   const toggleTrack = (kind) => {
     if (!state.localStream) return;
-    state.localStream.getTracks().forEach((track) => {
-      if (track.kind === kind) {
-        track.enabled = !track.enabled;
-      }
-    });
-    if (kind === 'video') {
-      refreshStage();
-    }
-    syncTrackButtons();
-    emitMediaUpdate();
+    const nextState = !isTrackEnabled(kind);
+    setMediaTrackState(kind, nextState);
   };
 
   const stopScreenShare = () => {
@@ -2068,7 +2352,8 @@
     state.screenStream = null;
     refreshStage();
     if (elements.screenShareBtn) {
-      elements.screenShareBtn.textContent = 'Share screen';
+      setButtonLabel(elements.screenShareBtn, 'Share');
+      elements.screenShareBtn.setAttribute('aria-label', 'Start screen share');
     }
     if (state.activeSpeaker === 'host') {
       hideSpeakerBanner();
@@ -2096,6 +2381,22 @@
     elements.liveCameraToggle?.addEventListener('click', () => toggleTrack('video'));
   };
 
+  const bindViewerControls = () => {
+    if (state.isHost) return;
+    elements.viewerMicToggle?.addEventListener('click', () => {
+      if (!state.canUseMedia.audio) return;
+      const nextState = !isTrackEnabled('audio');
+      setMediaTrackState('audio', nextState);
+      updateViewerMediaControls();
+    });
+    elements.viewerCameraToggle?.addEventListener('click', () => {
+      if (!state.canUseMedia.video) return;
+      const nextState = !isTrackEnabled('video');
+      setMediaTrackState('video', nextState, { suppressBanner: true });
+      updateViewerMediaControls();
+    });
+  };
+
   elements.screenShareBtn?.addEventListener('click', async () => {
     if (!state.isHost) return;
     if (state.screenStream) {
@@ -2119,7 +2420,8 @@
         renegotiate(pc, token);
       });
       if (elements.screenShareBtn) {
-        elements.screenShareBtn.textContent = 'Stop sharing';
+        setButtonLabel(elements.screenShareBtn, 'Stop sharing');
+        elements.screenShareBtn.setAttribute('aria-label', 'Stop screen share');
       }
       displayStream.getTracks().forEach((track) => {
         track.addEventListener('ended', () => {
@@ -2171,9 +2473,13 @@
       if (elements.joinButton) {
         elements.joinButton.textContent = 'Ask to join';
       }
+      if (elements.nameInput && state.savedDisplayName) {
+        elements.nameInput.value = state.savedDisplayName;
+      }
     }
     await setupPreview();
     bindTrackToggles();
+    bindViewerControls();
     state.lobby = state.classInfo.lobby || [];
     updateHandRaiseButton();
     if (elements.endButton) {
@@ -2195,14 +2501,16 @@
         beginCall();
       }
     } else {
-      setView('joinView');
       if (state.joinToken) {
         setView('lobbyView');
         connectSocket();
+      } else {
+        await autoJoinWithSavedName();
       }
     }
 
     loadChatHistory();
+    updateViewerMediaControls();
   };
 
   init();
