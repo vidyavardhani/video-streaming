@@ -40,6 +40,8 @@
     previewReady: false
   };
 
+  const hostTrackRegistry = new WeakSet();
+
   const elements = {
     joinView: document.getElementById('join-view'),
     lobbyView: document.getElementById('lobby-view'),
@@ -905,23 +907,27 @@
   };
 
   const handleHostMediaTrack = (type, stream) => {
-    if (type === 'screen') {
-      state.hostMedia.screen = stream;
-      stream.getVideoTracks().forEach((track) => {
-        track.onended = () => {
-          state.hostMedia.screen = null;
-          refreshStage();
-        };
-      });
-    } else if (type === 'camera') {
-      state.hostMedia.camera = stream;
-      stream.getVideoTracks().forEach((track) => {
-        track.onended = () => {
-          state.hostMedia.camera = null;
-          refreshStage();
-        };
-      });
-    }
+    const key = type === 'screen' ? 'screen' : 'camera';
+    state.hostMedia[key] = stream;
+    stream.getVideoTracks().forEach((track) => {
+      if (hostTrackRegistry.has(track)) {
+        return;
+      }
+      hostTrackRegistry.add(track);
+      const updateStage = () => refreshStage();
+      const handleEnded = () => {
+        track.removeEventListener('mute', updateStage);
+        track.removeEventListener('unmute', updateStage);
+        track.removeEventListener('ended', handleEnded);
+        if (state.hostMedia[key] === stream) {
+          state.hostMedia[key] = null;
+        }
+        refreshStage();
+      };
+      track.addEventListener('mute', updateStage);
+      track.addEventListener('unmute', updateStage);
+      track.addEventListener('ended', handleEnded);
+    });
     refreshStage();
   };
 

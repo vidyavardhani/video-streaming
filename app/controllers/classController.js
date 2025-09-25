@@ -10,7 +10,7 @@ const {
 } = require('../utils/classState');
 const recordingService = require('../services/recordingService');
 
-const baseUrl = () => process.env.BASE_URL || 'http://localhost:4000';
+const baseUrl = () => process.env.BASE_URL || 'http://64.227.152.29:5000';
 
 const generateMeetingCode = () => {
   const digits = Math.floor(100000000 + Math.random() * 900000000).toString();
