@@ -34,7 +34,7 @@ app.set('views', path.join(__dirname, 'app/views'));
 app.set('view engine', 'ejs');
 app.use('/public', express.static(path.join(__dirname, 'app/public')));
 
-const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/video-streaming';
+const mongoUri = process.env.MONGO_URI || 'mongodb+srv://abnjain25:HelloVVD1@cluster0.wewp9ek.mongodb.net/video-streaming';
 mongoose
   .connect(mongoUri)
   .then(() => console.log('Connected to MongoDB'))
@@ -79,7 +79,7 @@ app.get('/class/:code', (req, res) => {
   res.render('class', { classCode: req.params.code });
 });
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
