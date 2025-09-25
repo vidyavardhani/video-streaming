@@ -7,7 +7,7 @@ module.exports = {
   },
   servers: [
     {
-      url: 'http://localhost:4000',
+      url: 'http://64.227.152.29:5000',
       description: 'Local server'
     }
   ],
