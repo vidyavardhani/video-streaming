@@ -67,6 +67,11 @@ const publicClassShape = (klass) => {
     meetingCode: klass.meetingCode,
     chatRoomId: klass.chatRoomId,
     host: hostDetails,
+    createdAt: klass.createdAt,
+    startTime: klass.startTime,
+    endTime: klass.endTime,
+    participantCount: activeParticipants.length,
+    attendanceCount: participantEntries.length,
     lobby: lobbyEntries.map((entry) => ({
       displayName: entry.displayName,
       token: entry.token,

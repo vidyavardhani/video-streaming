@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema({
   currentClass: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class'
+  },
+  apiKey: {
+    type: String,
+    select: false
   }
 }, { timestamps: true });
 

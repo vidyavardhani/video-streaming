@@ -9,35 +9,243 @@
   <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/public/css/style.css">
 </head>
-<body>
-  <main class="container">
-    <header style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-      <div>
-        <h1>Hello, <%= user.name %></h1>
-        <p class="tag">Manage your live classes from here</p>
+<body class="dashboard-body">
+  <div class="dashboard-app" id="dashboard-app" data-user-name="<%= user.name %>">
+    <aside class="dashboard-sidebar">
+      <div class="sidebar-header">
+        <div class="brand-mark">
+          <span class="brand-dot"></span>
+          <span class="brand-text">VVD Live</span>
+        </div>
+        <p class="brand-sub">Teacher console</p>
       </div>
-      <form action="/auth/logout" method="post">
-        <button type="submit" class="ghost">Logout</button>
+      <nav class="sidebar-nav" aria-label="Primary">
+        <button type="button" class="nav-item active" data-view="overview" id="nav-dashboard">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+              <path d="M4 9.5 12 4l8 5.5v10a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 19.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+              <path d="M9.5 20V12h5v8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            </svg>
+          </span>
+          <span class="nav-label">Dashboard</span>
+        </button>
+        <button type="button" class="nav-item" data-view="classes" id="nav-classes">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+              <path d="M4.5 5.5h15v7h-15z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+              <path d="M4.5 16.5h7v2.5h-7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+              <path d="M13.5 16.5h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            </svg>
+          </span>
+          <span class="nav-label">Classes</span>
+        </button>
+        <button type="button" class="nav-item" data-view="profile" id="nav-profile">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+              <circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+              <path d="M6 20v-1.5a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5V20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            </svg>
+          </span>
+          <span class="nav-label">Profile</span>
+        </button>
+        <button type="button" class="nav-item" data-view="developer" id="nav-developer">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+              <path d="m7.5 15.5-4-3.5 4-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="m16.5 8.5 4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="M13.5 6.5 10.5 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            </svg>
+          </span>
+          <span class="nav-label">Developer</span>
+        </button>
+      </nav>
+      <div class="sidebar-section" id="sidebar-classes">
+        <div class="sidebar-section-heading">
+          <span>Participants</span>
+          <span class="sidebar-count" id="sidebar-participant-count">0</span>
+        </div>
+        <p class="sidebar-empty" id="sidebar-participant-empty">Select a class to view who joined.</p>
+        <ul class="sidebar-list" id="sidebar-participant-list" aria-live="polite"></ul>
+      </div>
+      <form action="/auth/logout" method="post" class="sidebar-logout">
+        <button type="submit" class="logout-btn">Logout</button>
       </form>
-    </header>
+    </aside>
+    <main class="dashboard-main" id="dashboard-main">
+      <header class="main-header">
+        <div>
+          <p class="welcome-kicker">Welcome back</p>
+          <h1 id="welcome-title">Hi, <%= user.name %></h1>
+        </div>
+        <button type="button" id="quick-create" class="quick-action">
+          <span class="quick-icon" aria-hidden="true">+</span>
+          New class
+        </button>
+      </header>
 
-    <section class="dashboard-grid" id="dashboard">
-      <section class="card">
-        <h2>Create a new class</h2>
-        <form id="create-class-form">
-          <label for="title">Class title</label>
-          <input type="text" id="title" name="title" required placeholder="Physics - Chapter 5">
+      <section class="view active" data-view="overview" aria-labelledby="nav-dashboard">
+        <div class="stat-grid">
+          <article class="stat-card">
+            <p class="stat-label">Total classes</p>
+            <h2 class="stat-value" id="stat-total-classes">0</h2>
+            <p class="stat-foot">Across your full history</p>
+          </article>
+          <article class="stat-card">
+            <p class="stat-label">Active classes</p>
+            <h2 class="stat-value" id="stat-active-classes">0</h2>
+            <p class="stat-foot">Currently live sessions</p>
+          </article>
+          <article class="stat-card">
+            <p class="stat-label">Ended classes</p>
+            <h2 class="stat-value" id="stat-ended-classes">0</h2>
+            <p class="stat-foot">Completed broadcasts</p>
+          </article>
+          <article class="stat-card">
+            <p class="stat-label">Students joined</p>
+            <h2 class="stat-value" id="stat-total-students">0</h2>
+            <p class="stat-foot">Unique participants</p>
+          </article>
+        </div>
+
+        <section class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Recent classes</h2>
+              <p class="panel-sub">Jump back into your latest sessions.</p>
+            </div>
+            <button type="button" class="ghost-link" data-view-trigger="classes">View all</button>
+          </header>
+          <ul class="panel-list" id="recent-class-list"></ul>
+          <p class="panel-empty hidden" id="recent-empty">No classes yet. Create one to get started.</p>
+        </section>
+      </section>
+
+      <section class="view" data-view="classes" aria-labelledby="nav-classes">
+        <div class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Your classes</h2>
+              <p class="panel-sub">Monitor statuses, start sessions, and invite students.</p>
+            </div>
+            <button type="button" class="primary" id="open-create-modal">New class</button>
+          </header>
+          <div class="class-layout">
+            <div class="class-list-wrap">
+              <ul id="class-list" class="class-card-list" role="listbox" aria-label="Class list"></ul>
+              <p id="no-classes" class="panel-empty">No classes yet. Create one to get started.</p>
+              <div class="create-result hidden" id="create-result">
+                <p class="create-label">Class ready</p>
+                <p class="create-link">
+                  <span id="create-output"></span>
+                  <button type="button" class="ghost-link" id="copy-created-link">Copy link</button>
+                </p>
+              </div>
+              <div class="pagination" id="class-pagination" hidden>
+                <button type="button" class="page-btn" data-page="prev" aria-label="Previous page">‹</button>
+                <span class="page-status" id="page-status">Page 1</span>
+                <button type="button" class="page-btn" data-page="next" aria-label="Next page">›</button>
+              </div>
+            </div>
+            <aside class="class-detail" id="class-detail" aria-live="polite">
+              <div class="detail-placeholder">
+                <h3>Select a class</h3>
+                <p>Pick a class from the list to see participants and controls.</p>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="profile" aria-labelledby="nav-profile">
+        <div class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Your profile</h2>
+              <p class="panel-sub">Update your account details.</p>
+            </div>
+            <button type="button" class="ghost-link" id="edit-profile-toggle">Edit</button>
+          </header>
+          <form id="profile-form" class="form-stack" novalidate>
+            <label class="form-field">
+              <span>Name</span>
+              <input type="text" name="name" id="profile-name" disabled>
+            </label>
+            <label class="form-field">
+              <span>Email</span>
+              <input type="email" name="email" id="profile-email" disabled>
+            </label>
+            <label class="form-field">
+              <span>Password</span>
+              <input type="password" name="password" id="profile-password" placeholder="••••••" disabled>
+              <p class="field-hint">Leave blank to keep your current password.</p>
+            </label>
+            <div class="form-actions">
+              <button type="button" class="ghost" id="profile-cancel">Cancel</button>
+              <button type="submit" class="primary">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="view" data-view="developer" aria-labelledby="nav-developer">
+        <div class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Developer access</h2>
+              <p class="panel-sub">Use this key in your mobile broadcaster to authenticate.</p>
+            </div>
+          </header>
+          <div class="developer-card">
+            <div>
+              <p class="developer-label">Current API key</p>
+              <code class="developer-key" id="developer-key">—</code>
+            </div>
+            <div class="developer-actions">
+              <button type="button" class="ghost" id="copy-api-key">Copy</button>
+              <button type="button" class="primary" id="regen-api-key">Generate new</button>
+            </div>
+            <p class="developer-hint">Generating a new key replaces the previous one immediately.</p>
+            <div class="developer-docs">
+              <h3>Using the key</h3>
+              <p class="developer-hint">Authenticate mobile or server calls with a bearer token.</p>
+              <ol>
+                <li>Attach <code>Authorization: Bearer &lt;API_KEY&gt;</code> to every request.</li>
+                <li>Provide the class code in your payload or path when starting sessions.</li>
+                <li>Regenerate here if the key is ever exposed.</li>
+              </ol>
+              <pre><code>curl -X PATCH \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  https://your-domain/classes/123-456-789/start</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="dashboard-modal-layer hidden" id="create-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="create-modal-title">
+    <div class="dashboard-modal" role="document">
+      <header class="dashboard-modal-head">
+        <div>
+          <p class="modal-kicker">Create class</p>
+          <h2 id="create-modal-title">Schedule a new session</h2>
+        </div>
+        <button type="button" class="modal-close" id="create-modal-close" aria-label="Close">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+      <form id="create-class-form" class="modal-form">
+        <label class="form-field">
+          <span>Class title</span>
+          <input type="text" name="title" id="modal-title-input" required placeholder="Physics - Chapter 5">
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="ghost" id="create-modal-cancel">Cancel</button>
           <button type="submit" class="primary">Create class</button>
-        </form>
-      </section>
-
-      <section class="card">
-        <h2>Your classes</h2>
-        <p id="no-classes" class="hidden" style="color: var(--muted);">No classes yet. Create one to get started.</p>
-        <ul id="class-list" class="class-list"></ul>
-      </section>
-    </section>
-  </main>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="dashboard-toast" id="dashboard-toast" role="status" aria-live="polite"></div>
   <script src="/public/js/dashboard.js" defer></script>
 </body>
 </html>

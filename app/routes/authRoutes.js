@@ -27,5 +27,15 @@ router.post(
 
 router.post('/logout', authController.logout);
 router.get('/me', auth.optional, authController.me);
+router.put(
+  '/me',
+  auth.authenticate,
+  [
+    body('name').optional().trim().notEmpty(),
+    body('email').optional().isEmail().normalizeEmail(),
+    body('password').optional().isLength({ min: 6 })
+  ],
+  authController.updateProfile
+);
 
 module.exports = router;

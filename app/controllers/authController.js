@@ -85,11 +85,17 @@ exports.me = async (req, res) => {
     return res.status(401).json({ message: 'Unauthenticated' });
   }
 
+  const user = await User.findById(req.user._id).select('+apiKey');
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
   return res.json({
-    id: req.user._id,
-    name: req.user.name,
-    email: req.user.email,
-    role: req.user.role
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    apiKey: user.apiKey || null
   });
 };
 
@@ -100,4 +106,59 @@ exports.logout = (req, res) => {
     secure: process.env.NODE_ENV === 'production'
   });
   res.json({ message: 'Logged out' });
+};
+
+exports.updateProfile = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthenticated' });
+  }
+
+  const { name, email, password } = req.body;
+  if (!name && !email && !password) {
+    return res.status(400).json({ message: 'Provide at least one field to update' });
+  }
+
+  try {
+    const user = await User.findById(req.user._id).select('+apiKey');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (email && email !== user.email) {
+      const exists = await User.findOne({ email });
+      if (exists && exists._id.toString() !== user._id.toString()) {
+        return res.status(409).json({ message: 'Email already in use' });
+      }
+      user.email = email;
+    }
+
+    if (name) {
+      user.name = name;
+    }
+
+    if (password) {
+      user.password = await bcrypt.hash(password, 10);
+    }
+
+    await user.save();
+
+    return res.json({
+      message: 'Profile updated',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        apiKey: user.apiKey || null
+      }
+    });
+  } catch (error) {
+    console.error('Update profile error', error);
+    return res.status(500).json({ message: 'Unable to update profile' });
+  }
 };

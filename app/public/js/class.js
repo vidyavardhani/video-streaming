@@ -61,6 +61,18 @@
     storageRemove(storage.local, joinKey);
   };
 
+  const rejoinFlagKey = `vs_rejoin_${classCode}`;
+
+  const markRejoinNeeded = () => {
+    storageSet(storage.local, rejoinFlagKey, '1');
+  };
+
+  const clearRejoinNeeded = () => {
+    storageRemove(storage.local, rejoinFlagKey);
+  };
+
+  const shouldPromptRejoin = () => storageGet(storage.local, rejoinFlagKey) === '1';
+
   const getStoredDisplayName = () => storageGet(storage.local, displayNameKey) || '';
 
   const persistDisplayName = (name) => {
@@ -104,7 +116,18 @@
     stageZoom: 1,
     activeSpeaker: null,
     speakerTimeout: null,
-    canUseMedia: { audio: false, video: false }
+    canUseMedia: { audio: false, video: false },
+    reconnectTimer: null,
+    rejoinScreenActive: false,
+    rejoining: false,
+    skipRejoinFlag: false,
+    moreMenuOpen: false,
+    toastTimer: null,
+    modalResolver: null,
+    toastActionButton: null,
+    toastActionHandler: null,
+    moreMenuFocusCleanup: null,
+    modalFocusCleanup: null
   };
 
   const hostTrackRegistry = new WeakSet();
@@ -193,10 +216,196 @@
     controlWhiteboard: document.getElementById('control-whiteboard'),
     stageZoomIn: document.getElementById('stage-zoom-in'),
     stageZoomOut: document.getElementById('stage-zoom-out'),
-    speakerBanner: document.getElementById('speaker-banner')
+    speakerBanner: document.getElementById('speaker-banner'),
+    rejoinBtn: document.getElementById('rejoin-btn'),
+    rejoinView: document.getElementById('rejoin-view'),
+    rejoinHeading: document.getElementById('rejoin-heading'),
+    rejoinMessage: document.getElementById('rejoin-message'),
+    rejoinScreenBtn: document.getElementById('rejoin-screen-btn'),
+    controlMore: document.getElementById('control-more'),
+    controlMoreMenu: document.getElementById('control-more-menu'),
+    liveToast: document.getElementById('live-toast'),
+    modalLayer: document.getElementById('modal-layer'),
+    modalTitle: document.getElementById('modal-title'),
+    modalMessage: document.getElementById('modal-message'),
+    modalPrimary: document.getElementById('modal-primary'),
+    modalSecondary: document.getElementById('modal-secondary')
   };
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+  let audioContext = null;
+  let audioUnlockRequested = false;
+  const pendingTones = [];
+
+  const ensureAudioContext = () => {
+    if (audioContext) return audioContext;
+    if (!audioUnlockRequested) return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    try {
+      audioContext = new AudioCtx();
+    } catch (error) {
+      audioContext = null;
+    }
+    return audioContext;
+  };
+
+  const drainPendingTones = () => {
+    if (!audioContext || !pendingTones.length) return;
+    const queue = pendingTones.splice(0);
+    queue.forEach((preset, index) => {
+      const sequence = tonePresets[preset];
+      if (!sequence) return;
+      playToneSequence(audioContext, sequence, index * 0.12);
+    });
+  };
+
+  const unlockAudio = () => {
+    audioUnlockRequested = true;
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      ctx
+        .resume()
+        .then(() => {
+          drainPendingTones();
+        })
+        .catch(() => {});
+    } else {
+      drainPendingTones();
+    }
+  };
+
+  document.addEventListener('pointerdown', unlockAudio, { once: true });
+  document.addEventListener('keydown', unlockAudio, { once: true });
+
+  const tonePresets = {
+    join: [
+      { frequency: 660, duration: 120 },
+      { frequency: 880, duration: 180 }
+    ],
+    leave: [
+      { frequency: 320, duration: 160 },
+      { frequency: 240, duration: 200 }
+    ],
+    hand: [
+      { frequency: 780, duration: 140 },
+      { frequency: 920, duration: 160 }
+    ],
+    chat: [
+      { frequency: 520, duration: 120 },
+      { frequency: 640, duration: 120 }
+    ]
+  };
+
+  const FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'button:not([disabled])',
+    'textarea:not([disabled])',
+    'input:not([type="hidden"]):not([disabled])',
+    'select:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(',');
+
+  const getFocusableElements = (root) => {
+    if (!root) return [];
+    const nodes = Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR));
+    return nodes.filter((node) => {
+      if (node.hasAttribute('disabled') || node.getAttribute('aria-hidden') === 'true') {
+        return false;
+      }
+      const style = window.getComputedStyle(node);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    });
+  };
+
+  const setupFocusTrap = (container, { initialFocus = null, returnFocus = null } = {}) => {
+    if (!container) {
+      return () => {};
+    }
+    const cycle = () => getFocusableElements(container);
+    const handleKeydown = (event) => {
+      if (event.key !== 'Tab') return;
+      const focusables = cycle();
+      if (!focusables.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey) {
+        if (document.activeElement === first || !container.contains(document.activeElement)) {
+          event.preventDefault();
+          last.focus();
+        }
+        return;
+      }
+      if (document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    container.addEventListener('keydown', handleKeydown);
+
+    const target = initialFocus && container.contains(initialFocus) ? initialFocus : cycle()[0];
+    if (target) {
+      window.requestAnimationFrame(() => {
+        try {
+          target.focus();
+        } catch (error) {
+          /* ignore focus errors */
+        }
+      });
+    }
+
+    return () => {
+      container.removeEventListener('keydown', handleKeydown);
+      if (returnFocus && typeof returnFocus.focus === 'function') {
+        window.requestAnimationFrame(() => {
+          try {
+            returnFocus.focus();
+          } catch (error) {
+            /* ignore focus errors */
+          }
+        });
+      }
+    };
+  };
+
+  const playToneSequence = (ctx, sequence, offset = 0) => {
+    if (!ctx || !sequence?.length) return;
+    let cursor = ctx.currentTime + 0.02 + offset;
+    sequence.forEach(({ frequency, duration }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(frequency, cursor);
+      gain.gain.setValueAtTime(0, cursor);
+      gain.gain.linearRampToValueAtTime(0.18, cursor + 0.02);
+      const end = cursor + duration / 1000;
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(cursor);
+      osc.stop(end + 0.05);
+      cursor = end + 0.04;
+    });
+  };
+
+  const playTone = (preset) => {
+    const sequence = tonePresets[preset];
+    if (!sequence) return;
+    const ctx = ensureAudioContext();
+    if (!ctx) {
+      pendingTones.push(preset);
+      if (pendingTones.length > 6) {
+        pendingTones.shift();
+      }
+      return;
+    }
+    playToneSequence(ctx, sequence);
+  };
 
   const getStoredToken = () => storageGet(storage.local, tokenKey);
 
@@ -307,12 +516,14 @@
   const closeDrawer = () => {
     state.activeDrawer = null;
     syncDrawerState();
+    closeMoreMenu();
   };
 
   const toggleDrawer = (name) => {
     if (state.activeDrawer === name) {
       closeDrawer();
     } else {
+      closeMoreMenu();
       openDrawer(name);
     }
   };
@@ -577,6 +788,7 @@
   };
 
   const openUtilityPanel = (tab) => {
+    closeMoreMenu();
     if (typeof tab === 'string') {
       setUtilityTab(tab);
     }
@@ -589,13 +801,14 @@
     if (state.isHost) return;
     const canRaise = state.admitted && state.classInfo?.status === 'live';
     elements.handRaiseBtn.disabled = !canRaise;
-    const labelNode = elements.handRaiseBtn.querySelector('.label');
     const nextLabel = state.handRaised ? 'Lower hand' : 'Raise hand';
-    if (labelNode) {
-      labelNode.textContent = nextLabel;
-    } else {
-      elements.handRaiseBtn.textContent = nextLabel;
+    const textNode =
+      elements.handRaiseBtn.querySelector('.text') || elements.handRaiseBtn.querySelector('.label');
+    if (textNode) {
+      textNode.textContent = nextLabel;
     }
+    elements.handRaiseBtn.dataset.tooltip = nextLabel;
+    elements.handRaiseBtn.setAttribute('aria-label', nextLabel);
     elements.handRaiseBtn.setAttribute('aria-pressed', state.handRaised.toString());
   };
 
@@ -674,10 +887,15 @@
   };
 
   const setView = (name) => {
-    ['joinView', 'lobbyView', 'hostLobbyView', 'liveView', 'endedView'].forEach((key) => {
+    ['joinView', 'lobbyView', 'hostLobbyView', 'liveView', 'rejoinView', 'endedView'].forEach((key) => {
       if (!elements[key]) return;
       elements[key].classList.toggle('hidden', key !== name);
     });
+    document.body.classList.toggle('no-scroll', name === 'liveView');
+    if (name !== 'liveView') {
+      closeMoreMenu();
+      hideLiveToast();
+    }
   };
 
   const renderLobby = () => {
@@ -1202,11 +1420,15 @@
             console.error(response.error);
             return;
           }
+          const wasRejoining = state.rejoinScreenActive || state.rejoining;
           if (response.joinToken) {
             state.joinToken = response.joinToken;
             persistJoinToken(state.joinToken);
           }
+          hideRejoinPrompt();
+          clearReconnectTimer();
           state.isHost = response.role === 'host';
+          state.skipRejoinFlag = false;
           if (elements.hostControls) {
             elements.hostControls.classList.toggle('hidden', !state.isHost);
           }
@@ -1237,6 +1459,12 @@
           }
           refreshStage();
           updateHandRaiseButton();
+          if (wasRejoining) {
+            handleRejoinSuccess(response);
+            return;
+          }
+          resetRejoinButtons();
+          clearRejoinNeeded();
           if (response.classStatus === 'ended') {
             setView('endedView');
             return;
@@ -1267,6 +1495,39 @@
           emitMediaUpdate();
         }
       );
+    });
+
+    const handleSocketDrop = (reason) => {
+      const classIsLive = state.classInfo?.status === 'live';
+      state.skipRejoinFlag = false;
+      if (classIsLive) {
+        markRejoinNeeded();
+      }
+      if (!state.isHost) {
+        showRejoinPrompt();
+      }
+      if (classIsLive && (state.isHost || state.admitted)) {
+        const copy = state.isHost
+          ? { message: 'Connection lost. Rejoin to keep the class running.' }
+          : { message: 'Connection dropped. Tap rejoin to continue.' };
+        if (!state.rejoinScreenActive) {
+          showRejoinScreen(copy);
+        }
+        scheduleReconnect(state.isHost);
+      } else if (!state.isHost) {
+        scheduleReconnect();
+      }
+      if (reason !== 'manual') {
+        leaveSession();
+      }
+    };
+
+    state.socket.on('disconnect', () => {
+      handleSocketDrop('disconnect');
+    });
+
+    state.socket.on('connect_error', () => {
+      handleSocketDrop('error');
     });
 
     state.socket.on('lobby:update', ({ lobby }) => {
@@ -1335,6 +1596,18 @@
       if (state.isHost) {
         createPeerConnection(participant.token, true);
       }
+      if (participant.token !== state.joinToken) {
+        playTone('join');
+        const name = participant.displayName || getNameByToken(participant.token) || 'Participant';
+        if (state.isHost) {
+          showLiveToast(`${name} joined the class`, {
+            actionLabel: 'View participants',
+            onAction: () => toggleDrawer('participants')
+          });
+        } else {
+          showLiveToast(`${name} joined the class`);
+        }
+      }
     });
 
     state.socket.on('participant:removed', ({ joinToken }) => {
@@ -1347,6 +1620,10 @@
         state.joinToken = null;
         state.handRaised = false;
         updateHandRaiseButton();
+        state.skipRejoinFlag = true;
+        clearRejoinNeeded();
+        hideRejoinScreen();
+        resetRejoinButtons();
         if (!state.isHost && state.socket) {
           state.socket.disconnect();
           state.socket = null;
@@ -1369,6 +1646,11 @@
       if (state.activeSpeaker === joinToken) {
         hideSpeakerBanner();
       }
+      if (joinToken && joinToken !== state.joinToken) {
+        playTone('leave');
+        const name = getNameByToken(joinToken) || 'Participant';
+        showLiveToast(`${name} was removed`);
+      }
     });
 
     state.socket.on('participant:disconnected', ({ joinToken }) => {
@@ -1383,6 +1665,11 @@
       state.screenSenders = state.screenSenders.filter(({ token }) => token !== joinToken);
       if (state.activeSpeaker === joinToken) {
         hideSpeakerBanner();
+      }
+      if (joinToken && joinToken !== state.joinToken) {
+        playTone('leave');
+        const name = getNameByToken(joinToken) || 'Participant';
+        showLiveToast(`${name} left the class`);
       }
     });
 
@@ -1409,6 +1696,7 @@
       if (state.classInfo) {
         state.classInfo.status = 'ended';
       }
+      state.skipRejoinFlag = true;
       hideSpeakerBanner();
       leaveSession();
       setView('endedView');
@@ -1417,13 +1705,21 @@
       state.admitted = false;
       state.handRaised = false;
       updateHandRaiseButton();
+      clearRejoinNeeded();
+      hideRejoinScreen();
       if (!state.isHost && state.socket) {
         state.socket.disconnect();
         state.socket = null;
       }
     });
 
-    state.socket.on('chat:new', appendMessage);
+    state.socket.on('chat:new', (message) => {
+      const foreignMessage = message?.joinToken && message.joinToken !== state.joinToken;
+      if (foreignMessage) {
+        playTone('chat');
+      }
+      appendMessage(message);
+    });
     state.socket.on('chat:remove', ({ msgId }) => {
       const el = elements.chatMessages.querySelector(`[data-id="${msgId}"]`);
       if (el) el.remove();
@@ -1458,6 +1754,13 @@
       if (joinToken === state.joinToken) {
         state.handRaised = true;
         updateHandRaiseButton();
+      } else if (state.isHost) {
+        playTone('hand');
+        const label = name || getNameByToken(joinToken) || 'Participant';
+        showLiveToast(`${label} raised their hand`, {
+          actionLabel: 'View participants',
+          onAction: () => toggleDrawer('participants')
+        });
       }
     });
 
@@ -1603,8 +1906,11 @@
     syncDrawerState();
     refreshStage();
     hideSpeakerBanner();
+    clearReconnectTimer();
     state.canUseMedia = { audio: false, video: false };
     updateViewerMediaControls();
+    hideLiveToast();
+    closeMoreMenu();
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -1928,10 +2234,107 @@
     }
   };
 
+  const attemptRejoin = async () => {
+    hideRejoinPrompt();
+    clearReconnectTimer();
+    state.rejoining = true;
+    state.skipRejoinFlag = false;
+    markRejoinNeeded();
+    if (elements.rejoinBtn) {
+      elements.rejoinBtn.disabled = true;
+      setButtonLabel(elements.rejoinBtn, 'Rejoining…');
+    }
+    if (elements.rejoinScreenBtn) {
+      elements.rejoinScreenBtn.disabled = true;
+      setButtonLabel(elements.rejoinScreenBtn, 'Rejoining…');
+    }
+    leaveSession();
+    if (state.socket) {
+      try {
+        state.socket.disconnect();
+      } catch (error) {
+        /* ignore */
+      }
+      state.socket = null;
+    }
+    if (state.isHost) {
+      connectSocket();
+      return;
+    }
+    if (state.joinToken) {
+      connectSocket();
+    } else {
+      await autoJoinWithSavedName();
+    }
+  };
+
+  const handleRejoinSuccess = (response) => {
+    const statusFromResponse = response?.classStatus;
+    state.rejoining = false;
+    const refreshAndResume = async () => {
+      try {
+        await loadClass();
+      } catch (error) {
+        console.error('Rejoin refresh error', error);
+      }
+      const currentStatus = state.classInfo?.status || statusFromResponse;
+      if (currentStatus === 'ended') {
+        setView('endedView');
+        hideRejoinScreen();
+        resetRejoinButtons();
+        clearRejoinNeeded();
+        clearReconnectTimer();
+        refreshStage();
+        return;
+      }
+      if (state.isHost) {
+        setView(currentStatus === 'live' ? 'liveView' : 'hostLobbyView');
+        if (currentStatus === 'live') {
+          beginCall();
+        }
+        renderLobby();
+        refreshLobby();
+      } else if (state.joinToken) {
+        if (currentStatus === 'live') {
+          state.admitted = true;
+          setView('liveView');
+          beginCall();
+        } else {
+          setView('lobbyView');
+          if (elements.waitingMessage) {
+            elements.waitingMessage.textContent = 'Waiting for the host to let you in…';
+          }
+        }
+        const media = getMediaState(state.joinToken);
+        state.canUseMedia = {
+          audio: media.audio === true,
+          video: media.video === true
+        };
+        updateViewerMediaControls();
+      }
+      state.skipRejoinFlag = false;
+      hideRejoinScreen();
+      hideRejoinPrompt();
+      resetRejoinButtons();
+      clearRejoinNeeded();
+      clearReconnectTimer();
+      refreshStage();
+    };
+    refreshAndResume();
+  };
+
   elements.joinButton?.addEventListener('click', async () => {
     const displayName = elements.nameInput.value.trim();
     if (!displayName) {
       alert('Enter your name');
+      return;
+    }
+    const confirmed = await confirmAction({
+      title: 'Join meeting?',
+      message: `Join the class as ${displayName}?`,
+      confirmText: 'Join now'
+    });
+    if (!confirmed) {
       return;
     }
     persistDisplayName(displayName);
@@ -1966,17 +2369,27 @@
   });
 
   elements.endButton?.addEventListener('click', async () => {
-    const confirmed = window.confirm('End the class for everyone?');
+    const confirmed = await confirmAction({
+      title: 'End class?',
+      message: 'This will end the class for everyone immediately.',
+      confirmText: 'End for all'
+    });
     if (!confirmed) return;
     await fetch(`/classes/${classCode}/end`, { method: 'PATCH' });
     leaveSession();
     setView('endedView');
     clearJoinToken();
     state.joinToken = null;
+    state.skipRejoinFlag = true;
+    closeMoreMenu();
   });
 
-  elements.leaveBtn?.addEventListener('click', () => {
-    const confirmed = window.confirm('Leave the class?');
+  elements.leaveBtn?.addEventListener('click', async () => {
+    const confirmed = await confirmAction({
+      title: 'Leave meeting?',
+      message: 'You can rejoin later while the class is live.',
+      confirmText: 'Leave class'
+    });
     if (!confirmed) return;
     leaveSession();
     if (!state.isHost && state.socket) {
@@ -1985,14 +2398,29 @@
     }
     clearJoinToken();
     state.joinToken = null;
+    state.admitted = false;
+    state.skipRejoinFlag = true;
+    clearRejoinNeeded();
+    hideRejoinScreen();
+    resetRejoinButtons();
     setView('joinView');
+    closeMoreMenu();
   });
 
   elements.copyLink?.addEventListener('click', async (e) => {
     const link = e.currentTarget.dataset.link || window.location.href;
     await navigator.clipboard.writeText(link);
-    e.currentTarget.textContent = 'Copied!';
-    setTimeout(() => (e.currentTarget.textContent = 'Copy link'), 1500);
+    const originalLabel = e.currentTarget.getAttribute('aria-label') || 'Copy invite link';
+    const originalTooltip = e.currentTarget.dataset.tooltip || 'Copy invite link';
+    e.currentTarget.dataset.tooltip = 'Copied!';
+    e.currentTarget.setAttribute('aria-label', 'Invite link copied');
+    e.currentTarget.classList.add('copied');
+    setTimeout(() => {
+      e.currentTarget.dataset.tooltip = originalTooltip;
+      e.currentTarget.setAttribute('aria-label', originalLabel);
+      e.currentTarget.classList.remove('copied');
+    }, 1600);
+    showLiveToast('Invite link copied');
   });
 
   elements.copyCode?.addEventListener('click', async (e) => {
@@ -2001,13 +2429,23 @@
     await navigator.clipboard.writeText(code);
     e.currentTarget.textContent = 'Copied!';
     setTimeout(() => (e.currentTarget.textContent = 'Copy code'), 1500);
+    showLiveToast('Class code copied');
   });
 
   elements.shareInfo?.addEventListener('click', async (e) => {
     const link = elements.copyLink?.dataset.link || e.currentTarget.dataset.link || window.location.href;
     await navigator.clipboard.writeText(link);
-    e.currentTarget.textContent = 'Copied!';
-    setTimeout(() => (e.currentTarget.textContent = 'Copy invite'), 1500);
+    const originalLabel = e.currentTarget.getAttribute('aria-label') || 'Copy invite link';
+    const originalTooltip = e.currentTarget.dataset.tooltip || 'Copy invite link';
+    e.currentTarget.dataset.tooltip = 'Copied!';
+    e.currentTarget.setAttribute('aria-label', 'Invite link copied');
+    e.currentTarget.classList.add('copied');
+    setTimeout(() => {
+      e.currentTarget.dataset.tooltip = originalTooltip;
+      e.currentTarget.setAttribute('aria-label', originalLabel);
+      e.currentTarget.classList.remove('copied');
+    }, 1600);
+    showLiveToast('Invite link copied');
   });
 
   elements.controlPolls?.addEventListener('click', () => {
@@ -2141,6 +2579,34 @@
   });
 
   elements.handRaiseBtn?.addEventListener('click', toggleHandRaise);
+  elements.rejoinBtn?.addEventListener('click', attemptRejoin);
+  elements.rejoinScreenBtn?.addEventListener('click', attemptRejoin);
+
+  elements.controlMore?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleMoreMenu();
+  });
+
+  elements.controlMoreMenu?.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    window.setTimeout(() => closeMoreMenu(), 80);
+  });
+
+  document.addEventListener('click', hideMoreMenuOnEvent);
+
+  elements.modalLayer?.addEventListener('click', (event) => {
+    if (event.target === elements.modalLayer && typeof state.modalResolver === 'function') {
+      state.modalResolver(false);
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (state.moreMenuOpen) {
+      closeMoreMenu();
+    }
+  });
 
   elements.chatForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2160,25 +2626,298 @@
   const setToggleState = (button, activeLabel, inactiveLabel, isActive) => {
     if (!button) return;
     button.classList.toggle('is-off', !isActive);
-    const labelNode = button.querySelector('.label');
+    const labelNode = button.querySelector('.label, .text');
     if (labelNode) {
       labelNode.textContent = isActive ? activeLabel : inactiveLabel;
-    } else {
-      button.textContent = isActive ? activeLabel : inactiveLabel;
     }
     if (typeof isActive === 'boolean') {
       button.setAttribute('aria-pressed', isActive.toString());
     }
+    if (button.dataset) {
+      button.dataset.tooltip = isActive ? activeLabel : inactiveLabel;
+    }
+    button.setAttribute('aria-label', isActive ? activeLabel : inactiveLabel);
   };
 
   const setButtonLabel = (button, text) => {
     if (!button) return;
-    const labelNode = button.querySelector('.label');
+    const labelNode = button.querySelector('.label, .text');
     if (labelNode) {
       labelNode.textContent = text;
-    } else {
-      button.textContent = text;
     }
+    if (button.dataset) {
+      button.dataset.tooltip = text;
+    }
+    button.setAttribute('aria-label', text);
+  };
+
+  const handleMoreMenuKeydown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMoreMenu();
+    }
+  };
+
+  const closeMoreMenu = () => {
+    if (!elements.controlMoreMenu || !state.moreMenuOpen) return;
+    const menu = elements.controlMoreMenu;
+    state.moreMenuOpen = false;
+    menu.classList.remove('open');
+    menu.setAttribute('aria-hidden', 'true');
+    elements.controlMore?.setAttribute('aria-expanded', 'false');
+    menu.removeEventListener('keydown', handleMoreMenuKeydown);
+    if (typeof state.moreMenuFocusCleanup === 'function') {
+      state.moreMenuFocusCleanup();
+      state.moreMenuFocusCleanup = null;
+    }
+    const finalize = () => menu.classList.add('hidden');
+    menu.addEventListener('transitionend', finalize, { once: true });
+    window.setTimeout(finalize, 220);
+  };
+
+  const openMoreMenu = () => {
+    if (!elements.controlMoreMenu || state.moreMenuOpen) return;
+    const menu = elements.controlMoreMenu;
+    menu.classList.remove('hidden');
+    menu.setAttribute('aria-hidden', 'false');
+    state.moreMenuOpen = true;
+    elements.controlMore?.setAttribute('aria-expanded', 'true');
+    menu.addEventListener('keydown', handleMoreMenuKeydown);
+    requestAnimationFrame(() => {
+      if (!state.moreMenuOpen) return;
+      menu.classList.add('open');
+      if (typeof state.moreMenuFocusCleanup === 'function') {
+        state.moreMenuFocusCleanup();
+      }
+      state.moreMenuFocusCleanup = setupFocusTrap(menu, {
+        returnFocus: elements.controlMore
+      });
+    });
+  };
+
+  const toggleMoreMenu = (force) => {
+    const shouldOpen = typeof force === 'boolean' ? force : !state.moreMenuOpen;
+    if (shouldOpen) {
+      openMoreMenu();
+    } else {
+      closeMoreMenu();
+    }
+  };
+
+  function hideMoreMenuOnEvent(event) {
+    if (!state.moreMenuOpen) return;
+    if (elements.controlMoreMenu.contains(event.target) || elements.controlMore?.contains(event.target)) {
+      return;
+    }
+    closeMoreMenu();
+  }
+
+  const showLiveToast = (message, options = {}) => {
+    if (!elements.liveToast || !message) return;
+    const { actionLabel, onAction } = options;
+    if (state.toastActionButton) {
+      state.toastActionButton.removeEventListener('click', state.toastActionHandler);
+      state.toastActionButton = null;
+      state.toastActionHandler = null;
+    }
+    if (actionLabel && typeof onAction === 'function') {
+      elements.liveToast.innerHTML = `<span class="toast-text">${message}</span><button type="button" class="toast-action">${actionLabel}</button>`;
+      const actionBtn = elements.liveToast.querySelector('.toast-action');
+      if (actionBtn) {
+        const handler = (event) => {
+          event.stopPropagation();
+          onAction();
+        };
+        actionBtn.addEventListener('click', handler, { once: true });
+        state.toastActionButton = actionBtn;
+        state.toastActionHandler = handler;
+      }
+    } else {
+      elements.liveToast.textContent = message;
+    }
+    elements.liveToast.classList.add('show');
+    if (state.toastTimer) {
+      clearTimeout(state.toastTimer);
+    }
+    state.toastTimer = window.setTimeout(() => {
+      elements.liveToast.classList.remove('show');
+      state.toastTimer = null;
+    }, 2600);
+  };
+
+  const hideLiveToast = () => {
+    if (!elements.liveToast) return;
+    elements.liveToast.classList.remove('show');
+    if (state.toastTimer) {
+      clearTimeout(state.toastTimer);
+      state.toastTimer = null;
+    }
+    if (state.toastActionButton && state.toastActionHandler) {
+      state.toastActionButton.removeEventListener('click', state.toastActionHandler);
+    }
+    state.toastActionButton = null;
+    state.toastActionHandler = null;
+  };
+
+  const showModal = async ({
+    title = 'Confirm',
+    message = '',
+    confirmText = 'Continue',
+    cancelText = 'Cancel'
+  } = {}) => {
+    if (!elements.modalLayer || !elements.modalPrimary || !elements.modalSecondary) {
+      return true;
+    }
+    closeMoreMenu();
+    hideLiveToast();
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return new Promise((resolve) => {
+      const cleanup = (result) => {
+        if (typeof state.modalFocusCleanup === 'function') {
+          state.modalFocusCleanup();
+          state.modalFocusCleanup = null;
+        } else if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+          window.requestAnimationFrame(() => {
+            try {
+              previouslyFocused.focus();
+            } catch (error) {
+              /* ignore focus errors */
+            }
+          });
+        }
+        state.modalResolver = null;
+        elements.modalPrimary.removeEventListener('click', confirmHandler);
+        elements.modalSecondary.removeEventListener('click', cancelHandler);
+        document.removeEventListener('keydown', keyHandler);
+        elements.modalLayer.classList.remove('open');
+        const hide = () => {
+          elements.modalLayer.setAttribute('aria-hidden', 'true');
+          elements.modalLayer.classList.add('hidden');
+        };
+        elements.modalLayer.addEventListener('transitionend', hide, { once: true });
+        window.setTimeout(hide, 220);
+        resolve(result);
+      };
+
+      const confirmHandler = () => {
+        cleanup(true);
+      };
+
+      const cancelHandler = () => {
+        cleanup(false);
+      };
+
+      const keyHandler = (event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          cancelHandler();
+        }
+      };
+
+      state.modalResolver = cleanup;
+      elements.modalTitle.textContent = title;
+      elements.modalMessage.textContent = message;
+      elements.modalPrimary.textContent = confirmText;
+      if (cancelText) {
+        elements.modalSecondary.textContent = cancelText;
+        elements.modalSecondary.classList.remove('hidden');
+      } else {
+        elements.modalSecondary.classList.add('hidden');
+      }
+
+      elements.modalPrimary.addEventListener('click', confirmHandler);
+      if (cancelText) {
+        elements.modalSecondary.addEventListener('click', cancelHandler);
+      }
+      document.addEventListener('keydown', keyHandler);
+
+      elements.modalLayer.classList.remove('hidden');
+      elements.modalLayer.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(() => {
+        elements.modalLayer.classList.add('open');
+        if (typeof state.modalFocusCleanup === 'function') {
+          state.modalFocusCleanup();
+        }
+        state.modalFocusCleanup = setupFocusTrap(elements.modalLayer, {
+          initialFocus: elements.modalPrimary,
+          returnFocus: previouslyFocused
+        });
+      });
+    });
+  };
+
+  const confirmAction = async (options) => {
+    const result = await showModal(options);
+    return !!result;
+  };
+
+  const buildRejoinCopy = (copy = {}) => ({
+    heading: state.isHost ? 'Resume teaching' : 'Reconnect to your class',
+    message: state.isHost
+      ? 'You left the class. Rejoin to keep the session live.'
+      : 'You left the class. Rejoin to continue learning.',
+    ...copy
+  });
+
+  const showRejoinScreen = (copy = {}) => {
+    const { heading, message } = buildRejoinCopy(copy);
+    if (elements.rejoinHeading) {
+      elements.rejoinHeading.textContent = heading;
+    }
+    if (elements.rejoinMessage) {
+      elements.rejoinMessage.textContent = message;
+    }
+    if (elements.rejoinScreenBtn) {
+      elements.rejoinScreenBtn.disabled = !!state.rejoining;
+      setButtonLabel(elements.rejoinScreenBtn, state.rejoining ? 'Rejoining…' : 'Rejoin');
+    }
+    state.rejoinScreenActive = true;
+    hideRejoinPrompt();
+    setView('rejoinView');
+  };
+
+  const resetRejoinButtons = () => {
+    if (elements.rejoinBtn) {
+      elements.rejoinBtn.disabled = false;
+      setButtonLabel(elements.rejoinBtn, 'Rejoin');
+    }
+    if (elements.rejoinScreenBtn) {
+      elements.rejoinScreenBtn.disabled = false;
+      setButtonLabel(elements.rejoinScreenBtn, 'Rejoin');
+    }
+  };
+
+  const hideRejoinScreen = () => {
+    state.rejoinScreenActive = false;
+    resetRejoinButtons();
+  };
+
+  const showRejoinPrompt = () => {
+    if (!elements.rejoinBtn || state.isHost) return;
+    elements.rejoinBtn.classList.remove('hidden');
+    elements.rejoinBtn.disabled = false;
+    setButtonLabel(elements.rejoinBtn, 'Rejoin');
+  };
+
+  const hideRejoinPrompt = () => {
+    if (!elements.rejoinBtn) return;
+    elements.rejoinBtn.classList.add('hidden');
+  };
+
+  const clearReconnectTimer = () => {
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
+    }
+  };
+
+  const scheduleReconnect = (force = false) => {
+    if (state.reconnectTimer) return;
+    if (!force && state.isHost) return;
+    state.reconnectTimer = window.setTimeout(() => {
+      state.reconnectTimer = null;
+      attemptRejoin();
+    }, force ? 1200 : 1800);
   };
 
   const updateViewerMediaControls = () => {
@@ -2352,7 +3091,7 @@
     state.screenStream = null;
     refreshStage();
     if (elements.screenShareBtn) {
-      setButtonLabel(elements.screenShareBtn, 'Share');
+    setButtonLabel(elements.screenShareBtn, 'Share screen');
       elements.screenShareBtn.setAttribute('aria-label', 'Start screen share');
     }
     if (state.activeSpeaker === 'host') {
@@ -2448,11 +3187,27 @@
   elements.drawerBackdrop?.addEventListener('click', () => closeDrawer());
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      closeDrawer();
+      if (state.moreMenuOpen) {
+        closeMoreMenu();
+      } else if (typeof state.modalResolver === 'function') {
+        state.modalResolver(false);
+      } else {
+        closeDrawer();
+      }
+      hideLiveToast();
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (!state.skipRejoinFlag && state.classInfo?.status === 'live' && (state.isHost || state.admitted)) {
+      markRejoinNeeded();
+    } else {
+      clearRejoinNeeded();
     }
   });
 
   const init = async () => {
+    hideRejoinPrompt();
     await loadClass();
     await loadUser();
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
@@ -2491,7 +3246,24 @@
     if (elements.hostControls) {
       elements.hostControls.classList.toggle('hidden', !state.isHost);
     }
-    if (state.isHost) {
+    const needsRejoin = shouldPromptRejoin() && state.classInfo.status === 'live';
+    if (needsRejoin) {
+      const copy = state.isHost
+        ? {
+            heading: 'Resume teaching',
+            message: 'You were disconnected. Rejoin to keep the class running.'
+          }
+        : {
+            heading: 'Reconnect to your class',
+            message: 'You were disconnected. Rejoin to continue learning.'
+          };
+      showRejoinScreen(copy);
+      if (state.isHost) {
+        scheduleReconnect(true);
+      } else if (state.joinToken) {
+        scheduleReconnect();
+      }
+    } else if (state.isHost) {
       elements.nameInput.value = state.user.name;
       setView(state.classInfo.status === 'live' ? 'liveView' : 'hostLobbyView');
       connectSocket();

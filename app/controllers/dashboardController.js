@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const User = require('../models/User');
 const ClassModel = require('../models/Class');
 const Chat = require('../models/Chat');
@@ -78,5 +79,21 @@ exports.classChatLogs = async (req, res) => {
   } catch (error) {
     console.error('Chat logs error', error);
     res.status(500).json({ message: 'Unable to load chat logs' });
+  }
+};
+
+exports.generateApiKey = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('+apiKey');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    const token = crypto.randomBytes(32).toString('hex');
+    user.apiKey = token;
+    await user.save();
+    res.json({ apiKey: token });
+  } catch (error) {
+    console.error('Generate API key error', error);
+    res.status(500).json({ message: 'Unable to generate API key' });
   }
 };
