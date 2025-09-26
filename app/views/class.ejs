@@ -90,7 +90,7 @@
         <div class="stage">
           <div class="stage-main" id="stage-main">
             <video id="primary-video" autoplay playsinline></video>
-            <div class="stage-live-watermark"><img src="https://vvdlive.com/logo.svg" width="154" alt="Live watermark"></div>
+            <!-- <div class="stage-live-watermark"><img src="https://vvdlive.com/logo.svg" width="154" alt="Live watermark"></div> -->
             <div class="stage-overlay">
               <span id="primary-label">Connecting…</span>
             </div>
@@ -223,15 +223,7 @@
                   </svg>
                 </span>
               </button>
-              <button id="live-camera-toggle" class="control-btn host-only" type="button" aria-label="Toggle camera" aria-pressed="true" data-tooltip="Camera">
-                <span class="icon">
-                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
-                    <rect x="4" y="6" width="11" height="12" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
-                    <path d="M15 10l5-3v10l-5-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
-                  </svg>
-                </span>
-              </button>
-              <button id="viewer-camera-toggle" class="control-btn student-only" type="button" aria-label="Toggle camera" aria-pressed="false" disabled data-tooltip="Camera">
+                 <button id="viewer-camera-toggle" class="control-btn student-only" type="button" aria-label="Toggle camera" aria-pressed="false" disabled data-tooltip="Camera">
                 <span class="icon">
                   <svg viewBox="0 0 24 24" role="presentation" focusable="false">
                     <rect x="4" y="6" width="11" height="12" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
@@ -240,6 +232,36 @@
                   </svg>
                 </span>
               </button>
+
+              <button id="live-camera-toggle" class="control-btn host-only" type="button" aria-label="Toggle camera" aria-pressed="true" data-tooltip="Camera">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <rect x="4" y="6" width="11" height="12" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+                    <path d="M15 10l5-3v10l-5-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+                  </svg>
+                </span>
+              </button>
+                  <button id="toggle-chat" class="control-btn" type="button" aria-label="Chat" data-tooltip="Chat">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+            <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-4.5L8 20v-4H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" 
+              fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+          </svg>
+        </span>
+      </button>
+
+      <!-- ✅ New Participants button directly in dock -->
+      <button id="toggle-participants" class="control-btn" type="button" aria-label="Participants" data-tooltip="Participants">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+            <path d="M12 12a3.5 3.5 0 1 0-3.5-3.5A3.5 3.5 0 0 0 12 12z" fill="none" stroke="currentColor" stroke-width="1.6"></path>
+            <path d="M6 20v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+          </svg>
+        </span>
+      </button>
+
+           
+
               <button id="screen-share" class="control-btn host-only" type="button" aria-label="Share screen" data-tooltip="Screen share">
                 <span class="icon">
                   <svg viewBox="0 0 24 24" role="presentation" focusable="false">
@@ -249,6 +271,15 @@
                   </svg>
                 </span>
               </button>
+                <button id="end-btn" class="control-btn danger host-only" type="button" aria-label="End class" data-tooltip="End class">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+            <path d="M5 15a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+            <path d="M8 18l-2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M16 18l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </span>
+      </button>
                
               <button id="control-more" class="control-btn" type="button" aria-label="More options" aria-controls="control-more-menu" aria-haspopup="true" aria-expanded="false" data-tooltip="More">
                 <span class="icon">
@@ -264,15 +295,15 @@
         </footer>
         <div id="control-more-menu" class="control-more-menu hidden" role="menu" aria-labelledby="control-more" aria-hidden="true">
           <div class="menu-grid">
-            <button id="toggle-chat" class="menu-btn" type="button" role="menuitem" data-tooltip="Chat">
+            <!-- <button id="toggle-chat" class="menu-btn" type="button" role="menuitem" data-tooltip="Chat">
               <span class="icon">
                 <svg viewBox="0 0 24 24" role="presentation" focusable="false">
                   <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-4.5L8 20v-4H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
                 </svg>
               </span>
               <span class="text">Chat</span>
-            </button>
-            <button id="toggle-participants" class="menu-btn" type="button" role="menuitem" data-tooltip="Participants">
+            </button> -->
+            <!-- <button id="toggle-participants" class="menu-btn" type="button" role="menuitem" data-tooltip="Participants">
               <span class="icon">
                 <svg viewBox="0 0 24 24" role="presentation" focusable="false">
                   <path d="M12 12a3.5 3.5 0 1 0-3.5-3.5A3.5 3.5 0 0 0 12 12z" fill="none" stroke="currentColor" stroke-width="1.6"></path>
@@ -280,7 +311,7 @@
                 </svg>
               </span>
               <span class="text">Participants</span>
-            </button>
+            </button> -->
             <!-- <button id="hand-raise-btn" class="menu-btn student-only" type="button" role="menuitem" data-tooltip="Raise hand">
               <span class="icon">
                 <svg viewBox="0 0 24 24" role="presentation" focusable="false">

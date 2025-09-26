@@ -629,11 +629,11 @@ body.is-student #join-btn {
 
 .meeting-header {
     position: absolute;
-    top: 2.25rem;
-    left: 9%;
-    transform: translateX(-50%);
+    top: 0;
+    left: 0;
+    transform: none;   /* remove centering */
     display: flex;
-    align-items: left;
+    align-items: flex-start; /* was "left", valid is flex-start */
     gap: 1.25rem;
     padding: 0.75rem 1.6rem;
     background: rgba(12, 14, 25, 0.55);
@@ -742,7 +742,7 @@ body.is-student #join-btn {
   width: 100%;
   height: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 0;
   background: radial-gradient(circle at 50% 35%, rgba(99, 102, 241, 0.18), transparent 55%),
@@ -883,7 +883,7 @@ body.is-student #join-btn {
 }
 
 .participant-strip {
-  display: flex;
+  display: none;
   gap: 0.85rem;
   overflow-x: auto;
   padding-bottom: 0.25rem;
@@ -1237,6 +1237,7 @@ body.is-student .participant-strip {
   align-items: center;
   pointer-events: none;
   z-index: 50;
+  margin-bottom: 20px;
 }
 
 .meeting-controls .control-bar {
@@ -2841,4 +2842,21 @@ body.dashboard-body {
   .detail-actions button {
     flex: 1 1 auto;
   }
+  .side-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 100%;
+  height: 100vh;
+  background: rgba(15, 16, 24, 0.95);
+  backdrop-filter: blur(16px);
+  box-shadow: -12px 0 48px rgba(5, 6, 15, 0.6);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  z-index: 60;
+  overflow: hidden;
+  overflow-y: auto;
+}
 }
