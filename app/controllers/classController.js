@@ -86,6 +86,7 @@ const publicClassShape = (klass) => {
       allowedToSpeakAt: entry.allowedToSpeakAt,
       sessions: entry.sessions || []
     })),
+    hostMediaState: klass.hostMediaState || { audio: false, video: false },
     attendance: participantEntries.map((entry) => ({
       displayName: entry.displayName,
       token: entry.token,
@@ -185,6 +186,7 @@ exports.end = async (req, res) => {
       participant.allowedToSpeakAt = null;
       participant.mediaState = participant.mediaState || { audio: false, video: false };
     });
+    klass.hostMediaState = { audio: false, video: false };
 
     if (klass.recording?.isRecording) {
       await recordingService.stopRecording(klass);
