@@ -388,10 +388,21 @@ module.exports = (io) => {
 
     socket.on('media:update', async ({ audio, video }) => {
       const { classMongoId, token, role } = socket.data || {};
-      if (!classMongoId || role !== 'participant') return;
+      if (!classMongoId) return;
       try {
         const klass = await ClassModel.findById(classMongoId);
         if (!klass) return;
+        if (role === 'host') {
+          const current = klass.hostMediaState || {};
+          klass.hostMediaState = {
+            audio: typeof audio === 'boolean' ? audio : current.audio === true,
+            video: typeof video === 'boolean' ? video : current.video === true
+          };
+          await klass.save();
+          io.to(klass.meetingCode).emit('host:state', klass.hostMediaState);
+          return;
+        }
+        if (role !== 'participant') return;
         const participant = klass.participants.find((entry) => entry.token === token);
         if (!participant || participant.expelledAt) return;
         participant.mediaState = {

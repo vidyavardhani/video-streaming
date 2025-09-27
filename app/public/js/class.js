@@ -134,6 +134,8 @@
     activeDirectChat: null
   };
 
+  state.mediaStates.set('host', { audio: false, video: false });
+
   const hostTrackRegistry = new WeakSet();
   const remoteTrackGuards = new WeakMap();
   const remotePresence = new Map();
@@ -293,6 +295,34 @@
     scheduleReconnect();
   };
 
+  const disconnectForUnrecoverableMedia = () => {
+    if (state.isHost) {
+      return;
+    }
+    clearPeerRecovery('host');
+    hostMediaSync?.refreshExpectation?.();
+    clearReconnectTimer();
+    state.rejoining = false;
+    state.skipRejoinFlag = false;
+    markRejoinNeeded();
+    connectionWatchdog?.clearFailure?.();
+    connectionWatchdog?.clearToast?.();
+    leaveSession();
+    if (state.socket) {
+      try {
+        state.socket.disconnect();
+      } catch (error) {
+        console.warn('Socket disconnect error', error);
+      }
+      state.socket = null;
+    }
+    showRejoinScreen({
+      heading: 'Connection not established',
+      message: 'Connection not established. Please rejoin.'
+    });
+    resetRejoinButtons();
+  };
+
   const attemptPeerRecovery = (token, { iceRestart = false } = {}) => {
     if (!token) return;
     const pc = state.peers.get(token);
@@ -364,7 +394,7 @@
       window.setTimeout(() => {
         remoteLossTimers.delete(key);
         handleRemoteTrackLoss(token, label, reason);
-      }, 3000)
+      }, 500)
     );
   };
 
@@ -2085,20 +2115,28 @@
       state: stateRef,
       onRenegotiate,
       onRejoin,
+      onFail,
       connectionWatchdog: watchdog,
-      pollInterval = 750,
-      stallThreshold = 3200,
+      getHostExpectation,
+      pollInterval = 500,
+      stallThreshold = 1200,
       maxFailure = 30000,
-      retryGap = 4000
+      retryInterval = 500,
+      maxRetries = 10,
+      gracePeriod = 1200
     } = {}) {
       this.state = stateRef;
       this.onRenegotiate = onRenegotiate;
       this.onRejoin = onRejoin;
+      this.onFail = onFail;
       this.connectionWatchdog = watchdog;
+      this.getHostExpectation = getHostExpectation;
       this.pollInterval = pollInterval;
       this.stallThreshold = stallThreshold;
       this.maxFailure = maxFailure;
-      this.retryGap = retryGap;
+      this.retryInterval = retryInterval;
+      this.maxRetries = maxRetries;
+      this.gracePeriod = gracePeriod;
       this.entries = new Map();
       this.intervalId = null;
       this.processing = false;
@@ -2106,6 +2144,12 @@
 
     setWatchdog(watchdog) {
       this.connectionWatchdog = watchdog;
+    }
+
+    setHostExpectationGetter(fn) {
+      if (typeof fn === 'function') {
+        this.getHostExpectation = fn;
+      }
     }
 
     register(token, pc) {
@@ -2119,12 +2163,17 @@
       entry.failureStart = null;
       entry.lastSyncAttempt = null;
       entry.rejoinNotified = false;
+      entry.retryTimer = null;
+      entry.retryCount = 0;
+      entry.registeredAt = Date.now();
       this.entries.set(token, entry);
       this.ensureTimer();
     }
 
     unregister(token) {
       if (!token) return;
+      const entry = this.entries.get(token);
+      this.stopRecovery(token, entry);
       this.entries.delete(token);
       if (this.entries.size === 0) {
         this.stopTimer();
@@ -2141,6 +2190,19 @@
         clearInterval(this.intervalId);
         this.intervalId = null;
       }
+    }
+
+    refreshExpectation() {
+      const now = Date.now();
+      this.entries.forEach((entry, token) => {
+        entry.audioStallSince = null;
+        entry.videoStallSince = null;
+        entry.failureStart = null;
+        entry.rejoinNotified = false;
+        entry.lastSyncAttempt = null;
+        entry.registeredAt = now;
+        this.stopRecovery(token, entry);
+      });
     }
 
     async tick() {
@@ -2169,6 +2231,7 @@
 
       const stateValue = pc.connectionState || pc.iceConnectionState;
       if (stateValue && !['connected', 'completed'].includes(stateValue)) {
+        this.stopRecovery(token, entry);
         entry.audioStallSince = null;
         entry.videoStallSince = null;
         entry.failureStart = null;
@@ -2178,6 +2241,7 @@
       }
 
       if (!this.state.isHost && token !== 'host') {
+        this.stopRecovery(token, entry);
         return;
       }
 
@@ -2191,11 +2255,15 @@
 
       if (!stats) return;
 
+      const now = Date.now();
+      if (!entry.registeredAt) {
+        entry.registeredAt = now;
+      }
+
       const direction = this.state.isHost ? 'outbound' : 'inbound';
       let audioBytes = null;
       let videoBytes = null;
       const receivers = typeof pc.getReceivers === 'function' ? pc.getReceivers() : [];
-      const updateFlag = (current, active) => (active ? true : current === null ? false : current);
       let remoteAudioActive = null;
       let remoteVideoActive = null;
       if (!this.state.isHost && receivers.length) {
@@ -2204,9 +2272,9 @@
           if (!track) return;
           const active = track.readyState === 'live' && !track.muted;
           if (track.kind === 'audio') {
-            remoteAudioActive = updateFlag(remoteAudioActive, active);
+            remoteAudioActive = active ? true : remoteAudioActive === null ? false : remoteAudioActive;
           } else if (track.kind === 'video') {
-            remoteVideoActive = updateFlag(remoteVideoActive, active);
+            remoteVideoActive = active ? true : remoteVideoActive === null ? false : remoteVideoActive;
           }
         });
       }
@@ -2229,67 +2297,95 @@
         }
       });
 
-      const now = Date.now();
-      const localAudioActive = this.state.isHost
-        ? !!this.state.localStream?.getAudioTracks().some((track) => track.enabled)
-        : null;
-      const localVideoActive = this.state.isHost
-        ? (
-            !!this.state.screenStream?.getVideoTracks().some((track) => track.readyState === 'live')
-            || !!this.state.localStream?.getVideoTracks().some((track) => track.enabled)
-          )
-        : null;
-      const audioExpected =
-        audioBytes !== null && (this.state.isHost ? localAudioActive : remoteAudioActive !== false);
-      const videoExpected =
-        videoBytes !== null && (this.state.isHost ? localVideoActive : remoteVideoActive !== false);
-      const audioHealthy = !audioExpected
-        || entry.lastAudioBytes === null
-        || audioBytes > entry.lastAudioBytes;
-      const videoHealthy = !videoExpected
-        || entry.lastVideoBytes === null
-        || videoBytes > entry.lastVideoBytes;
+      const hasAudioTrack = this.state.localStream
+        ? this.state.localStream.getAudioTracks().some((track) => track.enabled)
+        : false;
+      const hasCameraVideo = this.state.localStream
+        ? this.state.localStream.getVideoTracks().some((track) => track.enabled)
+        : false;
+      const hasScreenVideo = this.state.screenStream
+        ? this.state.screenStream.getVideoTracks().some((track) => track.readyState === 'live')
+        : false;
 
+      const localAudioActive = this.state.isHost ? hasAudioTrack : null;
+      const localVideoActive = this.state.isHost ? hasCameraVideo || hasScreenVideo : null;
+
+      const hostIntent =
+        !this.state.isHost && token === 'host' && typeof this.getHostExpectation === 'function'
+          ? this.getHostExpectation() || {}
+          : null;
+
+      const hostAudioExpected = hostIntent ? hostIntent.audio === true : null;
+      const hostVideoExpected = hostIntent ? hostIntent.video === true : null;
+
+      let audioExpected;
+      let videoExpected;
+
+      if (this.state.isHost) {
+        audioExpected = audioBytes !== null && localAudioActive;
+        videoExpected = videoBytes !== null && localVideoActive;
+      } else if (token === 'host') {
+        audioExpected = hostAudioExpected === null ? audioBytes !== null : hostAudioExpected;
+        videoExpected = hostVideoExpected === null ? videoBytes !== null : hostVideoExpected;
+      } else {
+        audioExpected = audioBytes !== null && remoteAudioActive !== false;
+        videoExpected = videoBytes !== null && remoteVideoActive !== false;
+      }
+
+      let audioHealthy = true;
       if (audioExpected) {
+        const progressed = audioBytes !== null && (entry.lastAudioBytes === null || audioBytes > entry.lastAudioBytes);
+        const trackLive = this.state.isHost ? true : remoteAudioActive !== false;
+        audioHealthy = progressed && trackLive;
+      }
+
+      let videoHealthy = true;
+      if (videoExpected) {
+        const progressed = videoBytes !== null && (entry.lastVideoBytes === null || videoBytes > entry.lastVideoBytes);
+        const trackLive = this.state.isHost ? true : remoteVideoActive !== false;
+        videoHealthy = progressed && trackLive;
+      }
+
+      if (audioBytes !== null) {
+        entry.lastAudioBytes = audioBytes;
+      }
+      if (videoBytes !== null) {
+        entry.lastVideoBytes = videoBytes;
+      }
+
+      if (now - entry.registeredAt < this.gracePeriod) {
         if (audioHealthy) {
           entry.audioStallSince = null;
-        } else if (!entry.audioStallSince) {
-          entry.audioStallSince = now;
         }
-        entry.lastAudioBytes = audioBytes;
-      } else {
-        entry.audioStallSince = null;
-        entry.lastAudioBytes = null;
-      }
-
-      if (videoExpected) {
         if (videoHealthy) {
           entry.videoStallSince = null;
-        } else if (!entry.videoStallSince) {
-          entry.videoStallSince = now;
         }
-        entry.lastVideoBytes = videoBytes;
-      } else {
-        entry.videoStallSince = null;
-        entry.lastVideoBytes = null;
+        return;
       }
 
-      const earliestStall = Math.min(
-        entry.audioStallSince || Infinity,
-        entry.videoStallSince || Infinity
-      );
+      if (audioExpected && !audioHealthy) {
+        if (!entry.audioStallSince) {
+          entry.audioStallSince = now;
+        }
+      } else {
+        entry.audioStallSince = null;
+      }
+
+      if (videoExpected && !videoHealthy) {
+        if (!entry.videoStallSince) {
+          entry.videoStallSince = now;
+        }
+      } else {
+        entry.videoStallSince = null;
+      }
+
+      const earliestStall = Math.min(entry.audioStallSince || Infinity, entry.videoStallSince || Infinity);
 
       if (earliestStall !== Infinity && now - earliestStall >= this.stallThreshold) {
         if (!entry.failureStart) {
           entry.failureStart = earliestStall;
         }
-        if (!entry.lastSyncAttempt || now - entry.lastSyncAttempt >= this.retryGap) {
-          this.connectionWatchdog?.showReconnecting?.('Syncing media…');
-          if (typeof this.onRenegotiate === 'function') {
-            this.onRenegotiate(token);
-          }
-          entry.lastSyncAttempt = now;
-        }
+        this.startRecovery(token, entry);
         if (
           !this.state.isHost &&
           typeof this.onRejoin === 'function' &&
@@ -2299,14 +2395,67 @@
           this.onRejoin('Media connection lost. Rejoining…');
           entry.rejoinNotified = true;
         }
-      } else if (earliestStall === Infinity) {
+      } else {
         if (entry.failureStart) {
           this.connectionWatchdog?.clearFailure?.();
           this.connectionWatchdog?.clearToast?.();
         }
         entry.failureStart = null;
-        entry.lastSyncAttempt = null;
         entry.rejoinNotified = false;
+        this.stopRecovery(token, entry);
+      }
+    }
+
+    startRecovery(token, entry) {
+      if (!entry) return;
+      if (!entry.retryTimer) {
+        entry.retryCount = 0;
+        this.bumpRecovery(token, entry);
+        entry.retryTimer = window.setInterval(() => {
+          if (!this.entries.has(token)) {
+            this.stopRecovery(token, entry);
+            return;
+          }
+          this.bumpRecovery(token, entry);
+        }, this.retryInterval);
+      }
+    }
+
+    stopRecovery(token, entry) {
+      const ref = entry || this.entries.get(token);
+      if (!ref) return;
+      if (ref.retryTimer) {
+        clearInterval(ref.retryTimer);
+        ref.retryTimer = null;
+      }
+      ref.retryCount = 0;
+    }
+
+    bumpRecovery(token, entry) {
+      if (!entry) return;
+      if (entry.retryCount >= this.maxRetries) {
+        this.failOut(token, entry);
+        return;
+      }
+      entry.retryCount += 1;
+      entry.lastSyncAttempt = Date.now();
+      this.connectionWatchdog?.showReconnecting('Recovering media…');
+      if (typeof this.onRenegotiate === 'function') {
+        this.onRenegotiate(token);
+      }
+    }
+
+    failOut(token, entry) {
+      this.stopRecovery(token, entry);
+      if (entry) {
+        entry.failureStart = null;
+        entry.audioStallSince = null;
+        entry.videoStallSince = null;
+      }
+      if (typeof this.onFail === 'function') {
+        this.connectionWatchdog?.clearFailure?.();
+        this.connectionWatchdog?.clearToast?.();
+        this.onFail(token);
       }
     }
   }
@@ -3440,6 +3589,7 @@
     state.pollHistory = state.classInfo.pollHistory || [];
     state.questions = state.classInfo.questions || [];
     state.recording = state.classInfo.recording || { isRecording: false };
+    applyMediaState('host', state.classInfo.hostMediaState || { audio: false, video: false });
     (state.classInfo.participants || []).forEach((participant) => {
       applyMediaState(participant.token, participant.mediaState);
     });
@@ -3920,6 +4070,16 @@
       alert('The host allowed you to speak. Your microphone is enabled.');
     });
 
+    state.socket.on('host:state', (mediaState = {}) => {
+      applyMediaState('host', mediaState);
+      if (state.classInfo) {
+        state.classInfo.hostMediaState = mediaState;
+      }
+      if (!state.isHost) {
+        hostMediaSync?.refreshExpectation?.();
+      }
+    });
+
     state.socket.on('host:media', async (mediaState) => {
       try {
         await applyHostMediaState(mediaState);
@@ -4020,7 +4180,10 @@
   };
 
   const leaveSession = () => {
-    state.peers.forEach((pc) => pc.close());
+    state.peers.forEach((pc, key) => {
+      hostMediaSync?.unregister?.(key);
+      pc.close();
+    });
     state.peers.clear();
     state.videos.forEach((node, key) => {
       if (key !== 'local') node.remove();
@@ -4041,6 +4204,9 @@
     peerStatsIntervals.forEach((timer) => clearInterval(timer));
     peerStatsIntervals.clear();
     peerStatsSamples.clear();
+    state.mediaStates.clear();
+    state.mediaStates.set('host', { audio: false, video: false });
+    hostMediaSync?.refreshExpectation?.();
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -5256,16 +5422,29 @@
       hostMediaSync = new HostMediaAutoSync({
         state,
         connectionWatchdog,
+        getHostExpectation: () => getMediaState('host'),
+        pollInterval: 500,
+        stallThreshold: 1000,
+        retryInterval: 500,
+        maxRetries: 10,
+        maxFailure: 20000,
+        gracePeriod: 1200,
         onRenegotiate: (token) => {
           attemptPeerRecovery(token, { iceRestart: true });
           schedulePeerRecovery(token, 'media-desync');
         },
         onRejoin: (message) => {
           triggerSilentRejoin({ message });
+        },
+        onFail: (token) => {
+          if (!state.isHost && token === 'host') {
+            disconnectForUnrecoverableMedia();
+          }
         }
       });
     } else {
       hostMediaSync.setWatchdog(connectionWatchdog);
+      hostMediaSync.setHostExpectationGetter(() => getMediaState('host'));
     }
     if (!controlCenter && elements.controlCenterPanel) {
       controlCenter = new ControlCenter({

@@ -212,6 +212,10 @@ const classSchema = new mongoose.Schema({
     type: [participantSchema],
     default: []
   },
+  hostMediaState: {
+    type: mediaStateSchema,
+    default: () => ({ audio: false, video: false })
+  },
   startTime: Date,
   endTime: Date,
   whiteboard: {
