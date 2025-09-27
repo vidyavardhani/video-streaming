@@ -2079,6 +2079,237 @@
     }
   }
 
+  class HostMediaAutoSync {
+    constructor({
+      state: stateRef,
+      onRenegotiate,
+      onRejoin,
+      connectionWatchdog: watchdog,
+      pollInterval = 750,
+      stallThreshold = 3200,
+      maxFailure = 30000,
+      retryGap = 4000
+    } = {}) {
+      this.state = stateRef;
+      this.onRenegotiate = onRenegotiate;
+      this.onRejoin = onRejoin;
+      this.connectionWatchdog = watchdog;
+      this.pollInterval = pollInterval;
+      this.stallThreshold = stallThreshold;
+      this.maxFailure = maxFailure;
+      this.retryGap = retryGap;
+      this.entries = new Map();
+      this.intervalId = null;
+      this.processing = false;
+    }
+
+    setWatchdog(watchdog) {
+      this.connectionWatchdog = watchdog;
+    }
+
+    register(token, pc) {
+      if (!token || !pc) return;
+      const entry = this.entries.get(token) || {};
+      entry.pc = pc;
+      entry.lastAudioBytes = null;
+      entry.lastVideoBytes = null;
+      entry.audioStallSince = null;
+      entry.videoStallSince = null;
+      entry.failureStart = null;
+      entry.lastSyncAttempt = null;
+      entry.rejoinNotified = false;
+      this.entries.set(token, entry);
+      this.ensureTimer();
+    }
+
+    unregister(token) {
+      if (!token) return;
+      this.entries.delete(token);
+      if (this.entries.size === 0) {
+        this.stopTimer();
+      }
+    }
+
+    ensureTimer() {
+      if (this.intervalId || this.entries.size === 0) return;
+      this.intervalId = window.setInterval(() => this.tick(), this.pollInterval);
+    }
+
+    stopTimer() {
+      if (this.intervalId) {
+        clearInterval(this.intervalId);
+        this.intervalId = null;
+      }
+    }
+
+    async tick() {
+      if (this.processing) return;
+      if (this.entries.size === 0) {
+        this.stopTimer();
+        return;
+      }
+      this.processing = true;
+      try {
+        const snapshot = Array.from(this.entries.entries());
+        for (const [token, entry] of snapshot) {
+          await this.inspectPeer(token, entry);
+        }
+      } finally {
+        this.processing = false;
+      }
+    }
+
+    async inspectPeer(token, entry) {
+      const pc = entry?.pc;
+      if (!pc || typeof pc.getStats !== 'function') {
+        this.unregister(token);
+        return;
+      }
+
+      const stateValue = pc.connectionState || pc.iceConnectionState;
+      if (stateValue && !['connected', 'completed'].includes(stateValue)) {
+        entry.audioStallSince = null;
+        entry.videoStallSince = null;
+        entry.failureStart = null;
+        entry.lastSyncAttempt = null;
+        entry.rejoinNotified = false;
+        return;
+      }
+
+      if (!this.state.isHost && token !== 'host') {
+        return;
+      }
+
+      let stats;
+      try {
+        stats = await pc.getStats();
+      } catch (error) {
+        console.warn('Stats error during media sync', error);
+        return;
+      }
+
+      if (!stats) return;
+
+      const direction = this.state.isHost ? 'outbound' : 'inbound';
+      let audioBytes = null;
+      let videoBytes = null;
+      const receivers = typeof pc.getReceivers === 'function' ? pc.getReceivers() : [];
+      const updateFlag = (current, active) => (active ? true : current === null ? false : current);
+      let remoteAudioActive = null;
+      let remoteVideoActive = null;
+      if (!this.state.isHost && receivers.length) {
+        receivers.forEach((receiver) => {
+          const track = receiver.track;
+          if (!track) return;
+          const active = track.readyState === 'live' && !track.muted;
+          if (track.kind === 'audio') {
+            remoteAudioActive = updateFlag(remoteAudioActive, active);
+          } else if (track.kind === 'video') {
+            remoteVideoActive = updateFlag(remoteVideoActive, active);
+          }
+        });
+      }
+
+      stats.forEach((report) => {
+        if (!report || report.isRemote) return;
+        const kind = report.kind || report.mediaType;
+        if (direction === 'inbound' && report.type === 'inbound-rtp') {
+          if (kind === 'audio') {
+            audioBytes = Math.max(audioBytes ?? 0, report.bytesReceived || 0);
+          } else if (kind === 'video') {
+            videoBytes = Math.max(videoBytes ?? 0, report.bytesReceived || 0);
+          }
+        } else if (direction === 'outbound' && report.type === 'outbound-rtp') {
+          if (kind === 'audio') {
+            audioBytes = Math.max(audioBytes ?? 0, report.bytesSent || 0);
+          } else if (kind === 'video') {
+            videoBytes = Math.max(videoBytes ?? 0, report.bytesSent || 0);
+          }
+        }
+      });
+
+      const now = Date.now();
+      const localAudioActive = this.state.isHost
+        ? !!this.state.localStream?.getAudioTracks().some((track) => track.enabled)
+        : null;
+      const localVideoActive = this.state.isHost
+        ? (
+            !!this.state.screenStream?.getVideoTracks().some((track) => track.readyState === 'live')
+            || !!this.state.localStream?.getVideoTracks().some((track) => track.enabled)
+          )
+        : null;
+      const audioExpected =
+        audioBytes !== null && (this.state.isHost ? localAudioActive : remoteAudioActive !== false);
+      const videoExpected =
+        videoBytes !== null && (this.state.isHost ? localVideoActive : remoteVideoActive !== false);
+      const audioHealthy = !audioExpected
+        || entry.lastAudioBytes === null
+        || audioBytes > entry.lastAudioBytes;
+      const videoHealthy = !videoExpected
+        || entry.lastVideoBytes === null
+        || videoBytes > entry.lastVideoBytes;
+
+      if (audioExpected) {
+        if (audioHealthy) {
+          entry.audioStallSince = null;
+        } else if (!entry.audioStallSince) {
+          entry.audioStallSince = now;
+        }
+        entry.lastAudioBytes = audioBytes;
+      } else {
+        entry.audioStallSince = null;
+        entry.lastAudioBytes = null;
+      }
+
+      if (videoExpected) {
+        if (videoHealthy) {
+          entry.videoStallSince = null;
+        } else if (!entry.videoStallSince) {
+          entry.videoStallSince = now;
+        }
+        entry.lastVideoBytes = videoBytes;
+      } else {
+        entry.videoStallSince = null;
+        entry.lastVideoBytes = null;
+      }
+
+      const earliestStall = Math.min(
+        entry.audioStallSince || Infinity,
+        entry.videoStallSince || Infinity
+      );
+
+      if (earliestStall !== Infinity && now - earliestStall >= this.stallThreshold) {
+        if (!entry.failureStart) {
+          entry.failureStart = earliestStall;
+        }
+        if (!entry.lastSyncAttempt || now - entry.lastSyncAttempt >= this.retryGap) {
+          this.connectionWatchdog?.showReconnecting?.('Syncing media…');
+          if (typeof this.onRenegotiate === 'function') {
+            this.onRenegotiate(token);
+          }
+          entry.lastSyncAttempt = now;
+        }
+        if (
+          !this.state.isHost &&
+          typeof this.onRejoin === 'function' &&
+          !entry.rejoinNotified &&
+          now - entry.failureStart >= this.maxFailure
+        ) {
+          this.onRejoin('Media connection lost. Rejoining…');
+          entry.rejoinNotified = true;
+        }
+      } else if (earliestStall === Infinity) {
+        if (entry.failureStart) {
+          this.connectionWatchdog?.clearFailure?.();
+          this.connectionWatchdog?.clearToast?.();
+        }
+        entry.failureStart = null;
+        entry.lastSyncAttempt = null;
+        entry.rejoinNotified = false;
+      }
+    }
+  }
+
   let toneManager;
   let participantManager;
   let controlCenter;
@@ -2090,6 +2321,7 @@
   let cameraControl;
   let screenShareControl;
   let connectionWatchdog;
+  let hostMediaSync;
 
   const playTone = (preset) => {
     toneManager?.play(preset);
@@ -3811,6 +4043,7 @@
     if (!targetToken || state.peers.has(targetToken)) return state.peers.get(targetToken);
 
     const pc = new RTCPeerConnection(rtcConfig);
+    hostMediaSync?.register(targetToken, pc);
     state.peers.set(targetToken, pc);
     updateParticipantQuality(targetToken, 'connecting');
     connectionWatchdog?.watchPeer(pc);
@@ -3859,6 +4092,7 @@
       state.peers.delete(targetToken);
       participantQuality.delete(targetToken);
       stopPeerStatsMonitor(targetToken);
+      hostMediaSync?.unregister(targetToken);
       if (targetToken === 'host' && !state.isHost) {
         state.hostMedia = { camera: null, screen: null };
         refreshStage();
@@ -5005,6 +5239,21 @@
         hideToast: () => hideLiveToast()
       });
     }
+    if (!hostMediaSync) {
+      hostMediaSync = new HostMediaAutoSync({
+        state,
+        connectionWatchdog,
+        onRenegotiate: (token) => {
+          attemptPeerRecovery(token, { iceRestart: true });
+          schedulePeerRecovery(token, 'media-desync');
+        },
+        onRejoin: (message) => {
+          triggerSilentRejoin({ message });
+        }
+      });
+    } else {
+      hostMediaSync.setWatchdog(connectionWatchdog);
+    }
     if (!controlCenter) {
       controlCenter = new ControlCenter({
         panelEl: elements.controlCenterPanel,
@@ -5101,6 +5350,20 @@
         });
       }
       return;
+    }
+    const needsAudioPermission = typeof media.audio === 'boolean' && media.audio === true && !isTrackEnabled('audio');
+    const needsVideoPermission = typeof media.video === 'boolean' && media.video === true && !isTrackEnabled('video');
+    if ((needsAudioPermission || needsVideoPermission) && permissionManager) {
+      const stream = await permissionManager.ensureInteractivePermissions({
+        audio: needsAudioPermission,
+        video: needsVideoPermission
+      });
+      if (!state.localStream && stream) {
+        applyLocalStream(stream, { replace: true });
+      }
+      if (!state.localStream) {
+        return;
+      }
     }
     let shouldEmit = false;
     if (typeof media.audio === 'boolean') {
