@@ -44,12 +44,14 @@ const authRoutes = require('./app/routes/authRoutes');
 const classRoutes = require('./app/routes/classRoutes');
 const chatRoutes = require('./app/routes/chatRoutes');
 const dashboardRoutes = require('./app/routes/dashboardRoutes');
+const apiRoutes = require('./app/routes/apiRoutes');
 const { optional } = require('./app/middleware/auth');
 
 app.use('/auth', authRoutes);
 app.use('/classes', classRoutes);
 app.use('/chat', chatRoutes);
 app.use('/admin', dashboardRoutes);
+app.use('/api', apiRoutes);
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(docs));
 
 app.get('/', optional, (req, res) => {

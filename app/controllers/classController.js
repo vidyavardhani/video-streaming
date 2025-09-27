@@ -221,6 +221,32 @@ exports.join = async (req, res) => {
       return res.status(400).json({ message: 'Display name is required' });
     }
 
+    const providedToken = req.body.joinToken?.trim()
+      || req.body.inviteToken?.trim()
+      || req.body.token?.trim();
+
+    const autoAdmitByToken = providedToken
+      ? klass.participants.find((entry) => entry.token === providedToken)
+      : null;
+
+    if (autoAdmitByToken) {
+      if (autoAdmitByToken.expelledAt) {
+        return res.status(403).json({ message: 'You have been removed from the class' });
+      }
+      autoAdmitByToken.autoAdmit = true;
+      autoAdmitByToken.joinedAt = autoAdmitByToken.joinedAt || new Date();
+      startParticipantSession(autoAdmitByToken);
+      await klass.save();
+      return res.json({
+        message: 'Admitted',
+        joinToken: autoAdmitByToken.token,
+        participant: {
+          id: autoAdmitByToken._id,
+          displayName: autoAdmitByToken.displayName
+        }
+      });
+    }
+
     const existingParticipant = klass.participants.find((entry) => {
       if (req.user) {
         return entry.user?.toString() === req.user._id.toString();
@@ -252,18 +278,73 @@ exports.join = async (req, res) => {
     });
 
     if (existingLobby) {
+      if (existingLobby.autoAdmit) {
+        const participant = {
+          user: existingLobby.user,
+          displayName: existingLobby.displayName,
+          token: existingLobby.token,
+          joinedAt: new Date(),
+          mediaState: { audio: false, video: false },
+          sessions: [{ joinedAt: new Date() }]
+        };
+        klass.participants.push(participant);
+        klass.lobby = klass.lobby.filter((entry) => entry.token !== existingLobby.token);
+        await klass.save();
+        return res.json({
+          message: 'Admitted',
+          joinToken: participant.token,
+          participant: { displayName: participant.displayName }
+        });
+      }
       return res.json({
         message: 'Already requested',
         joinToken: existingLobby.token
       });
     }
 
+    if (providedToken) {
+      const lobbyAuto = klass.lobby.find((entry) => entry.token === providedToken);
+      if (lobbyAuto) {
+        lobbyAuto.autoAdmit = true;
+        lobbyAuto.displayName = displayName;
+        const participant = {
+          user: lobbyAuto.user,
+          displayName: lobbyAuto.displayName,
+          token: lobbyAuto.token,
+          joinedAt: new Date(),
+          mediaState: { audio: false, video: false },
+          sessions: [{ joinedAt: new Date() }]
+        };
+        klass.participants.push(participant);
+        klass.lobby = klass.lobby.filter((entry) => entry.token !== lobbyAuto.token);
+        await klass.save();
+        return res.json({
+          message: 'Admitted',
+          joinToken: participant.token,
+          participant: { displayName: participant.displayName }
+        });
+      }
+    }
+
     const entry = {
       user: req.user ? req.user._id : undefined,
       displayName,
-      token: uuid()
+      token: providedToken || uuid(),
+      autoAdmit: req.body.autoAdmit === true
     };
-    klass.lobby.push(entry);
+    if (entry.autoAdmit) {
+      const participant = {
+        user: entry.user,
+        displayName: entry.displayName,
+        token: entry.token,
+        joinedAt: new Date(),
+        mediaState: { audio: false, video: false },
+        sessions: [{ joinedAt: new Date() }]
+      };
+      klass.participants.push(participant);
+    } else {
+      klass.lobby.push(entry);
+    }
     await klass.save();
 
     const hostId = getHostId(klass);
@@ -272,6 +353,13 @@ exports.join = async (req, res) => {
       classCode: klass.meetingCode,
       lobby: klass.lobby.map((item) => ({ displayName: item.displayName, token: item.token }))
     });
+    }
+
+    if (entry.autoAdmit) {
+      return res.status(201).json({
+        message: 'Admitted',
+        joinToken: entry.token
+      });
     }
 
     return res.status(201).json({

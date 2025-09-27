@@ -128,7 +128,10 @@
     toastActionButton: null,
     toastActionHandler: null,
     moreMenuFocusCleanup: null,
-    modalFocusCleanup: null
+    modalFocusCleanup: null,
+    controlCenterOpen: false,
+    directChats: new Map(),
+    activeDirectChat: null
   };
 
   const hostTrackRegistry = new WeakSet();
@@ -137,6 +140,9 @@
   const remoteLossTimers = new Map();
   const remoteLossCounts = new Map();
   const peerRecovery = new Map();
+  const participantQuality = new Map();
+  const peerStatsIntervals = new Map();
+  const peerStatsSamples = new Map();
 
   const remoteLossKey = (token, label) => `${token}:${label}`;
 
@@ -152,6 +158,114 @@
     const presence = ensureRemotePresence(token);
     presence[label] = true;
     clearRemoteLoss(token, label, { resetCount: true });
+  };
+
+  const mergeQuality = (previous, next) => {
+    const base = typeof previous === 'object' && previous !== null ? previous : {};
+    if (typeof next === 'string') {
+      return { ...base, status: next };
+    }
+    if (typeof next === 'object' && next !== null) {
+      return { ...base, ...next };
+    }
+    return next;
+  };
+
+  const updateParticipantQuality = (token, status) => {
+    if (!token) return;
+    const current = participantQuality.get(token);
+    participantQuality.set(token, mergeQuality(current, status));
+    if (Array.isArray(state.classInfo?.participants)) {
+      controlCenter?.setParticipants(state.classInfo.participants, {
+        lobby: state.lobby,
+        mediaStates: state.mediaStates,
+        raised: state.raisedHands,
+        quality: participantQuality
+      });
+    }
+  };
+
+  const stopPeerStatsMonitor = (token) => {
+    const timer = peerStatsIntervals.get(token);
+    if (timer) {
+      clearInterval(timer);
+      peerStatsIntervals.delete(token);
+    }
+    peerStatsSamples.delete(token);
+  };
+
+  const collectPeerStats = async (token, pc) => {
+    if (!pc || typeof pc.getStats !== 'function') return;
+    try {
+      const stats = await pc.getStats();
+      let inboundAudio = 0;
+      let inboundVideo = 0;
+      let outboundAudio = 0;
+      let outboundVideo = 0;
+      let jitterTotal = 0;
+      let jitterSamples = 0;
+
+      stats.forEach((report) => {
+        if (report.type === 'inbound-rtp' && !report.isRemote) {
+          if (report.kind === 'video') {
+            inboundVideo += report.bytesReceived || 0;
+          } else if (report.kind === 'audio') {
+            inboundAudio += report.bytesReceived || 0;
+            if (typeof report.jitter === 'number') {
+              jitterTotal += report.jitter;
+              jitterSamples += 1;
+            }
+          }
+        } else if (report.type === 'outbound-rtp' && !report.isRemote) {
+          if (report.kind === 'video') {
+            outboundVideo += report.bytesSent || 0;
+          } else if (report.kind === 'audio') {
+            outboundAudio += report.bytesSent || 0;
+          }
+        }
+      });
+
+      const now = typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+      const previous = peerStatsSamples.get(token);
+      const totals = {
+        inbound: inboundAudio + inboundVideo,
+        outbound: outboundAudio + outboundVideo
+      };
+      let bitrateDown = null;
+      let bitrateUp = null;
+      if (previous && now > previous.timestamp) {
+        const deltaMs = now - previous.timestamp;
+        const inboundDelta = Math.max(0, totals.inbound - previous.inbound);
+        const outboundDelta = Math.max(0, totals.outbound - previous.outbound);
+        bitrateDown = Math.max(0, Math.round((inboundDelta * 8) / deltaMs));
+        bitrateUp = Math.max(0, Math.round((outboundDelta * 8) / deltaMs));
+      }
+      peerStatsSamples.set(token, { timestamp: now, inbound: totals.inbound, outbound: totals.outbound });
+
+      const jitter = jitterSamples ? Math.round((jitterTotal / jitterSamples) * 1000) : null;
+      updateParticipantQuality(token, {
+        metrics: {
+          bitrate: {
+            down: bitrateDown,
+            up: bitrateUp
+          },
+          jitter
+        }
+      });
+    } catch (error) {
+      console.warn('Failed to collect peer stats', error);
+      stopPeerStatsMonitor(token);
+    }
+  };
+
+  const startPeerStatsMonitor = (token, pc) => {
+    if (!token || !pc) return;
+    stopPeerStatsMonitor(token);
+    const poll = () => collectPeerStats(token, pc);
+    peerStatsIntervals.set(token, window.setInterval(poll, 4000));
+    poll();
   };
 
   const clearRemoteLoss = (token, label, { resetCount = false } = {}) => {
@@ -418,6 +532,24 @@
     handRaiseBtn: document.getElementById('hand-raise-btn'),
     raisedHands: document.getElementById('raised-hands'),
     raisedHandsList: document.getElementById('raised-hands-list'),
+    controlCenterPanel: document.getElementById('control-center-panel'),
+    controlCenterOpen: document.getElementById('open-control-center'),
+    controlCenterClose: document.getElementById('control-center-close'),
+    controlParticipantList: document.getElementById('control-participant-list'),
+    controlParticipantMeta: document.getElementById('control-participant-meta'),
+    controlParticipantCount: document.getElementById('control-participant-count'),
+    controlLobbyCount: document.getElementById('control-lobby-count'),
+    controlHandQueue: document.getElementById('control-hand-queue'),
+    controlHandCount: document.getElementById('control-hand-count'),
+    controlChatSidebar: document.getElementById('control-chat-sidebar'),
+    controlChatHeader: document.getElementById('control-chat-header'),
+    controlChatMessages: document.getElementById('control-chat-messages'),
+    controlChatCount: document.getElementById('control-chat-count'),
+    controlChatForm: document.getElementById('control-chat-form'),
+    controlChatInput: document.getElementById('control-chat-input'),
+    controlCallAudio: document.getElementById('control-call-audio'),
+    controlCallVideo: document.getElementById('control-call-video'),
+    controlCenterAlert: document.getElementById('control-center-alert'),
     viewerMicToggle: document.getElementById('viewer-mic-toggle'),
     viewerCameraToggle: document.getElementById('viewer-camera-toggle'),
     controlPolls: document.getElementById('control-polls'),
@@ -712,6 +844,993 @@
     }
   }
 
+  class ControlCenter {
+    constructor({
+      panelEl,
+      openButton,
+      closeButton,
+      participantList,
+      participantMeta,
+      participantCount,
+      lobbyCount,
+      handQueue,
+      handCount,
+      chatSidebar,
+      chatHeader,
+      chatMessages,
+      chatCount,
+      chatForm,
+      chatInput,
+      callAudioBtn,
+      callVideoBtn,
+      alertBadge
+    } = {}) {
+      this.panelEl = panelEl;
+      this.openButton = openButton;
+      this.closeButton = closeButton;
+      this.participantList = participantList;
+      this.participantMeta = participantMeta;
+      this.participantCount = participantCount;
+      this.lobbyCount = lobbyCount;
+      this.handQueue = handQueue;
+      this.handCount = handCount;
+      this.chatSidebar = chatSidebar;
+      this.chatHeader = chatHeader;
+      this.chatMessages = chatMessages;
+      this.chatCount = chatCount;
+      this.chatForm = chatForm;
+      this.chatInput = chatInput;
+      this.callAudioBtn = callAudioBtn;
+      this.callVideoBtn = callVideoBtn;
+      this.alertBadge = alertBadge;
+      this.visible = false;
+      this.onMute = null;
+      this.onVideo = null;
+      this.onRemove = null;
+      this.onAllow = null;
+      this.onMessage = null;
+      this.onCall = null;
+      this.onLower = null;
+      this.activeConversation = null;
+      this.sidebarItems = new Map();
+      this.onVisibilityChange = null;
+      this.isHostFlag = false;
+      this.bind();
+    }
+
+    bind() {
+      if (this.openButton) {
+        this.openButton.addEventListener('click', () => this.open());
+      }
+      if (this.closeButton) {
+        this.closeButton.addEventListener('click', () => this.close());
+      }
+      if (this.chatForm) {
+        this.chatForm.addEventListener('submit', (event) => {
+          event.preventDefault();
+          const value = this.chatInput?.value?.trim();
+          if (!value) return;
+          if (typeof this.onMessage === 'function') {
+            this.onMessage(this.activeConversation, value);
+          }
+          this.chatInput.value = '';
+        });
+      }
+      if (this.callAudioBtn) {
+        this.callAudioBtn.addEventListener('click', () => {
+          if (typeof this.onCall === 'function') {
+            this.onCall(this.activeConversation, { video: false });
+          }
+        });
+      }
+      if (this.callVideoBtn) {
+        this.callVideoBtn.addEventListener('click', () => {
+          if (typeof this.onCall === 'function') {
+            this.onCall(this.activeConversation, { video: true });
+          }
+        });
+      }
+    }
+
+    setCallbacks(callbacks = {}) {
+      this.onMute = callbacks.onMute || null;
+      this.onVideo = callbacks.onVideo || null;
+      this.onRemove = callbacks.onRemove || null;
+      this.onAllow = callbacks.onAllow || null;
+      this.onMessage = callbacks.onMessage || null;
+      this.onCall = callbacks.onCall || null;
+      this.onLower = callbacks.onLower || null;
+    }
+
+    setHost(flag) {
+      if (!this.openButton) return;
+      this.isHostFlag = !!flag;
+      if (flag) {
+        this.openButton.classList.remove('hidden');
+      } else {
+        this.openButton.classList.add('hidden');
+        this.close();
+      }
+    }
+
+    open() {
+      if (!this.panelEl) return;
+      this.panelEl.classList.remove('hidden');
+      this.panelEl.classList.add('visible');
+      this.visible = true;
+      this.clearAlert();
+      if (typeof this.onVisibilityChange === 'function') {
+        this.onVisibilityChange(true);
+      }
+    }
+
+    close() {
+      if (!this.panelEl) return;
+      this.panelEl.classList.add('hidden');
+      this.panelEl.classList.remove('visible');
+      this.visible = false;
+      if (typeof this.onVisibilityChange === 'function') {
+        this.onVisibilityChange(false);
+      }
+    }
+
+    setParticipants(
+      participants = [],
+      { lobby = [], mediaStates = new Map(), raised = new Map(), quality = new Map() } = {}
+    ) {
+      if (!this.participantList) return;
+      this.participantList.innerHTML = '';
+      const total = Array.isArray(participants) ? participants.length : 0;
+      const lobbyCount = Array.isArray(lobby) ? lobby.length : 0;
+      if (this.participantMeta) {
+        const liveTotal = this.isHostFlag ? total + 1 : total;
+        this.participantMeta.textContent = `${liveTotal} in class • ${lobbyCount} waiting`;
+      }
+      if (this.participantCount) {
+        this.participantCount.textContent = this.isHostFlag ? total + 1 : total;
+      }
+      if (this.lobbyCount) {
+        this.lobbyCount.textContent = lobbyCount;
+      }
+
+      const buildActions = (participant) => {
+        const container = document.createElement('div');
+        container.className = 'control-actions';
+        const media = mediaStates.get(participant.token) || participant.mediaState || {};
+        const addBtn = (label, handler, opts = {}) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `ghost small${opts.danger ? ' danger' : ''}`;
+          btn.textContent = label;
+          btn.addEventListener('click', () => handler(participant));
+          container.appendChild(btn);
+        };
+        if (this.onMute) {
+          addBtn(media.audio === false ? 'Unmute' : 'Mute', (entry) => this.onMute(entry, media.audio === false));
+        }
+        if (this.onVideo) {
+          addBtn(media.video === false ? 'Show video' : 'Hide video', (entry) => this.onVideo(entry, media.video === false));
+        }
+        if (raised.has(participant.token) && this.onAllow) {
+          addBtn('Approve', (entry) => this.onAllow(entry));
+        }
+        if (this.onMessage) {
+          addBtn('Message', () => this.selectConversation(participant.token));
+        }
+        if (this.onCall) {
+          addBtn('Audio call', () => this.onCall(participant.token, { video: false }));
+          addBtn('Video call', () => this.onCall(participant.token, { video: true }));
+        }
+        if (this.onRemove) {
+          addBtn('Remove', (entry) => this.onRemove(entry), { danger: true });
+        }
+        return container;
+      };
+
+      participants.forEach((participant) => {
+        const item = document.createElement('li');
+        const identity = document.createElement('div');
+        identity.className = 'identity';
+        const name = document.createElement('strong');
+        name.textContent = participant.displayName;
+        const meta = document.createElement('span');
+        const media = mediaStates.get(participant.token) || participant.mediaState || {};
+        const qualityInfo = quality.get(participant.token);
+        const qualityState =
+          typeof qualityInfo === 'object' && qualityInfo !== null
+            ? qualityInfo.status || 'connecting'
+            : qualityInfo || 'connecting';
+        const metrics =
+          typeof qualityInfo === 'object' && qualityInfo !== null ? qualityInfo.metrics || {} : {};
+        const labelParts = [media.audio === false ? 'Muted' : 'Mic on', media.video === false ? 'Video off' : 'Video on'];
+        const qualityLabel = (() => {
+          switch (qualityState) {
+            case 'connected':
+            case 'completed':
+              return 'Stable';
+            case 'disconnected':
+              return 'Reconnecting';
+            case 'failed':
+              return 'Failed';
+            case 'connecting':
+              return 'Connecting';
+            default:
+              return qualityState;
+          }
+        })();
+        labelParts.push(qualityLabel);
+        if (metrics?.bitrate) {
+          const down = typeof metrics.bitrate.down === 'number' ? metrics.bitrate.down : null;
+          const up = typeof metrics.bitrate.up === 'number' ? metrics.bitrate.up : null;
+          const metricParts = [];
+          if (down !== null) {
+            metricParts.push(`↓ ${down} kbps`);
+          }
+          if (up !== null) {
+            metricParts.push(`↑ ${up} kbps`);
+          }
+          if (metricParts.length) {
+            labelParts.push(metricParts.join(' '));
+          }
+        }
+        if (typeof metrics?.jitter === 'number') {
+          labelParts.push(`Jitter ${metrics.jitter} ms`);
+        }
+        meta.textContent = labelParts.join(' • ');
+        identity.appendChild(name);
+        identity.appendChild(meta);
+        item.appendChild(identity);
+        item.appendChild(buildActions(participant));
+        this.participantList.appendChild(item);
+      });
+      const activeTokens = new Set(participants.map((p) => p.token));
+      participantQuality.forEach((_, key) => {
+        if (!activeTokens.has(key)) {
+          participantQuality.delete(key);
+        }
+      });
+    }
+
+    setHandQueue(queue = []) {
+      if (!this.handQueue) return;
+      this.handQueue.innerHTML = '';
+      if (this.handCount) {
+        this.handCount.textContent = queue.length;
+      }
+      queue.forEach((entry) => {
+        const item = document.createElement('li');
+        const identity = document.createElement('div');
+        identity.className = 'identity';
+        const name = document.createElement('strong');
+        name.textContent = entry.displayName;
+        const meta = document.createElement('span');
+        meta.textContent = entry.handRaisedAt ? new Date(entry.handRaisedAt).toLocaleTimeString() : '';
+        identity.appendChild(name);
+        identity.appendChild(meta);
+        const actions = document.createElement('div');
+        actions.className = 'control-actions';
+        if (this.onAllow) {
+          const approve = document.createElement('button');
+          approve.type = 'button';
+          approve.className = 'ghost small';
+          approve.textContent = 'Approve';
+          approve.addEventListener('click', () => this.onAllow(entry));
+          actions.appendChild(approve);
+        }
+        const dismiss = document.createElement('button');
+        dismiss.type = 'button';
+        dismiss.className = 'ghost small';
+        dismiss.textContent = 'Dismiss';
+        dismiss.addEventListener('click', () => {
+          if (typeof this.onLower === 'function') {
+            this.onLower(entry);
+          }
+        });
+        actions.appendChild(dismiss);
+        item.appendChild(identity);
+        item.appendChild(actions);
+        this.handQueue.appendChild(item);
+      });
+    }
+
+    syncSidebar(conversations = []) {
+      if (!this.chatSidebar) return;
+      this.chatSidebar.innerHTML = '';
+      this.sidebarItems.clear();
+      conversations.forEach((conversation) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.token = conversation.token;
+        button.dataset.label = conversation.displayName || conversation.token;
+        const label = document.createElement('span');
+        label.textContent = conversation.displayName || 'Participant';
+        button.appendChild(label);
+        const badge = document.createElement('span');
+        badge.className = `presence-dot ${conversation.online ? 'presence-online' : 'presence-offline'}`;
+        button.appendChild(badge);
+        if (conversation.unread > 0) {
+          const unread = document.createElement('span');
+          unread.className = 'badge';
+          unread.textContent = conversation.unread;
+          button.appendChild(unread);
+        }
+        if (conversation.token === this.activeConversation) {
+          button.classList.add('active');
+        }
+        button.addEventListener('click', () => {
+          this.selectConversation(conversation.token);
+        });
+        this.chatSidebar.appendChild(button);
+        this.sidebarItems.set(conversation.token, button);
+      });
+      if (this.chatCount) {
+        const totalUnread = conversations.reduce((sum, conv) => sum + (conv.unread || 0), 0);
+        this.chatCount.textContent = totalUnread;
+        this.chatCount.classList.toggle('hidden', totalUnread === 0);
+        if (this.alertBadge) {
+          if (!this.visible && totalUnread > 0) {
+            this.alertBadge.classList.remove('hidden');
+            this.alertBadge.textContent = totalUnread > 99 ? '99+' : String(totalUnread);
+          } else if (totalUnread === 0) {
+            this.alertBadge.classList.add('hidden');
+          }
+        }
+      }
+    }
+
+    setConversation(token, messages = []) {
+      this.activeConversation = token;
+      if (this.chatHeader) {
+        if (!token) {
+          this.chatHeader.textContent = 'Select a participant';
+        } else {
+          const btn = this.sidebarItems.get(token);
+          const label = btn?.dataset?.label || token;
+          this.chatHeader.textContent = `Chat with ${label}`;
+        }
+      }
+      if (!this.chatMessages) return;
+      this.chatMessages.innerHTML = '';
+      messages.forEach((message) => this.appendMessage(message));
+      const button = this.sidebarItems.get(token);
+      this.sidebarItems.forEach((btn) => btn.classList.remove('active'));
+      if (button) {
+        button.classList.add('active');
+      }
+      if (this.chatInput) {
+        this.chatInput.disabled = !token;
+      }
+      if (this.callAudioBtn) {
+        this.callAudioBtn.disabled = !token;
+      }
+      if (this.callVideoBtn) {
+        this.callVideoBtn.disabled = !token;
+      }
+    }
+
+    appendMessage(message) {
+      if (!this.chatMessages) return;
+      const bubble = document.createElement('div');
+      bubble.className = 'control-chat-bubble';
+      if (message.from === state.joinToken || message.from === 'host') {
+        bubble.classList.add('me');
+      }
+      bubble.textContent = message.message || '';
+      const meta = document.createElement('div');
+      meta.className = 'control-chat-meta';
+      meta.textContent = new Date(message.createdAt || Date.now()).toLocaleTimeString();
+      bubble.appendChild(meta);
+      this.chatMessages.appendChild(bubble);
+      this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+
+    selectConversation(token) {
+      if (!token) return;
+      if (!this.visible) {
+        this.open();
+      }
+      if (typeof this.onMessage === 'function') {
+        // just to trigger seen updates we call with empty string? no.
+      }
+      this.activeConversation = token;
+      if (this.chatHeader) {
+        this.chatHeader.textContent = `Chat with ${token}`;
+      }
+      if (typeof this.onSelect === 'function') {
+        this.onSelect(token);
+      }
+    }
+
+    onSelectConversation(callback) {
+      this.onSelect = callback;
+    }
+
+    onToggle(callback) {
+      this.onVisibilityChange = callback;
+    }
+
+    showAlert() {
+      if (this.visible) return;
+      if (this.alertBadge) {
+        this.alertBadge.classList.remove('hidden');
+        this.alertBadge.textContent = '!';
+      }
+    }
+
+    clearAlert() {
+      if (this.alertBadge) {
+        this.alertBadge.classList.add('hidden');
+      }
+    }
+  }
+
+  class DirectChatManager {
+    constructor({ socket, controlCenter: center, toneManager: tones } = {}) {
+      this.socket = socket;
+      this.controlCenter = null;
+      this.toneManager = tones;
+      this.conversations = new Map();
+      this.activeToken = null;
+      this.selfToken = null;
+      if (center) {
+        this.attachControlCenter(center);
+      }
+    }
+
+    attachControlCenter(center) {
+      if (!center) return;
+      this.controlCenter = center;
+      this.controlCenter.onSelectConversation((token) => {
+        this.select(token);
+      });
+      this.syncSidebar();
+      if (this.activeToken) {
+        const conversation = this.conversations.get(this.activeToken);
+        if (conversation) {
+          this.controlCenter.setConversation(this.activeToken, conversation.messages);
+        }
+      } else {
+        this.controlCenter.setConversation(null, []);
+      }
+    }
+
+    attachSocket(socket) {
+      this.socket = socket;
+    }
+
+    setSelfToken(token) {
+      this.selfToken = token;
+    }
+
+    ensureConversation(token, data = {}) {
+      if (!token) return null;
+      if (!this.conversations.has(token)) {
+        this.conversations.set(token, {
+          token,
+          displayName: data.displayName || token,
+          messages: [],
+          unread: 0,
+          online: false,
+          historyCursor: null,
+          hasMore: true
+        });
+      } else if (data.displayName) {
+        const existing = this.conversations.get(token);
+        existing.displayName = data.displayName;
+      }
+      return this.conversations.get(token);
+    }
+
+    normalizeMessage(entry) {
+      if (!entry) return null;
+      const normal = { ...entry };
+      if (!normal.id) {
+        const stamp = normal.createdAt ? new Date(normal.createdAt).getTime() : Date.now();
+        normal.id = `${normal.from || 'unknown'}-${stamp}`;
+      }
+      if (normal.createdAt && !(normal.createdAt instanceof Date)) {
+        const parsed = new Date(normal.createdAt);
+        normal.createdAt = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+      }
+      if (normal.updatedAt && !(normal.updatedAt instanceof Date)) {
+        const parsed = new Date(normal.updatedAt);
+        normal.updatedAt = Number.isNaN(parsed.getTime()) ? null : parsed;
+      }
+      normal.seen = normal.seen === true || Boolean(normal.seenAt);
+      return normal;
+    }
+
+    mergeMessages(conversation, entries = [], { append = true } = {}) {
+      if (!conversation || !Array.isArray(entries) || !entries.length) return;
+      const existing = Array.isArray(conversation.messages) ? conversation.messages : [];
+      const combined = append ? existing.concat(entries) : entries.concat(existing);
+      const map = new Map();
+      combined.forEach((msg) => {
+        const normalized = this.normalizeMessage(msg);
+        if (normalized) {
+          map.set(normalized.id, normalized);
+        }
+      });
+      conversation.messages = Array.from(map.values()).sort((a, b) => {
+        const aTimeRaw = a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime();
+        const bTimeRaw = b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime();
+        const aTime = Number.isNaN(aTimeRaw) ? 0 : aTimeRaw;
+        const bTime = Number.isNaN(bTimeRaw) ? 0 : bTimeRaw;
+        return aTime - bTime;
+      });
+      if (conversation.messages.length > 200) {
+        conversation.messages = conversation.messages.slice(-200);
+      }
+    }
+
+    setParticipants(list = []) {
+      list.forEach((participant) => {
+        const conversation = this.ensureConversation(participant.token, participant);
+        if (conversation) {
+          conversation.online = true;
+        }
+      });
+      this.syncSidebar();
+    }
+
+    removeParticipant(token) {
+      if (!token) return;
+      const conversation = this.conversations.get(token);
+      if (conversation) {
+        conversation.online = false;
+        this.syncSidebar();
+      }
+    }
+
+    updatePresence(token, online) {
+      const conversation = this.ensureConversation(token);
+      if (!conversation) return;
+      conversation.online = online;
+      this.syncSidebar();
+    }
+
+    appendMessage(entry) {
+      const normalized = this.normalizeMessage(entry);
+      if (!normalized) return;
+      const token = normalized.from === this.selfToken ? normalized.to : normalized.from;
+      const conversation = this.ensureConversation(token);
+      if (!conversation) return;
+      this.mergeMessages(conversation, [normalized]);
+      if (token !== this.activeToken && normalized.from !== this.selfToken) {
+        conversation.unread = (conversation.unread || 0) + 1;
+        this.controlCenter?.showAlert();
+        this.toneManager?.play('chat');
+      }
+      if (token === this.activeToken) {
+        this.controlCenter?.appendMessage(normalized);
+        this.markSeen(token);
+      }
+      this.syncSidebar();
+    }
+
+    select(token) {
+      if (!token) return;
+      this.activeToken = token;
+      const conversation = this.ensureConversation(token);
+      if (!conversation) return;
+      if (!conversation.messages.length && this.socket) {
+        const payload = { target: token, limit: 60 };
+        this.socket.emit('direct:chat:history', payload, (response = {}) => {
+          if (Array.isArray(response.messages)) {
+            this.mergeMessages(conversation, response.messages, { append: false });
+            conversation.historyCursor = response.nextCursor || null;
+            conversation.hasMore = response.hasMore === true;
+            this.controlCenter?.setConversation(token, conversation.messages);
+            this.markSeen(token);
+          }
+        });
+      }
+      conversation.unread = 0;
+      this.controlCenter?.setConversation(token, conversation.messages);
+      this.syncSidebar();
+      this.markSeen(token);
+    }
+
+    markSeen(token) {
+      const conversation = this.conversations.get(token);
+      if (!conversation || !conversation.messages.length) return;
+      const ids = conversation.messages
+        .filter((msg) => !msg.seen && msg.from !== this.selfToken)
+        .map((msg) => msg.id)
+        .filter(Boolean);
+      if (!ids.length) return;
+      const idSet = new Set(ids);
+      conversation.messages.forEach((msg) => {
+        if (idSet.has(msg.id)) {
+          msg.seen = true;
+        }
+      });
+      if (this.socket) {
+        this.socket.emit('direct:chat:seen', { target: token, messageIds: ids });
+      }
+    }
+
+    sendMessage(token, message) {
+      if (!token || !message || !this.socket) return;
+      this.socket.emit('direct:chat:send', { target: token, message }, (response = {}) => {
+        if (response.error) {
+          console.warn('Direct chat send error', response.error);
+        }
+        if (response.message) {
+          this.appendMessage(response.message);
+        }
+      });
+    }
+
+    syncSidebar() {
+      if (!this.controlCenter) return;
+      const conversations = Array.from(this.conversations.values()).sort((a, b) => {
+        const unreadDiff = (b.unread || 0) - (a.unread || 0);
+        if (unreadDiff !== 0) return unreadDiff;
+        const nameA = (a.displayName || a.token || '').toLowerCase();
+        const nameB = (b.displayName || b.token || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+      this.controlCenter.syncSidebar(conversations);
+    }
+
+    resetCounts(token, ids) {
+      const conversation = this.conversations.get(token);
+      if (!conversation) return;
+      if (!Array.isArray(ids) || !ids.length) return;
+      const idSet = new Set(ids);
+      conversation.messages.forEach((msg) => {
+        if (idSet.has(msg.id)) {
+          msg.seen = true;
+        }
+      });
+      this.syncSidebar();
+    }
+  }
+
+  class DirectCallManager {
+    constructor({ socket, rtcConfig: config, permissionManager: permissions, toneManager: tones } = {}) {
+      this.socket = socket;
+      this.rtcConfig = config;
+      this.permissionManager = permissions;
+      this.toneManager = tones;
+      this.calls = new Map();
+      this.selfToken = null;
+    }
+
+    setSelfToken(token) {
+      this.selfToken = token;
+    }
+
+    attachSocket(socket) {
+      this.socket = socket;
+    }
+
+    attachPermissionManager(manager) {
+      this.permissionManager = manager;
+    }
+
+    ensureCall(token) {
+      if (!token) return null;
+      if (!this.calls.has(token)) {
+        this.calls.set(token, {
+          token,
+          direction: 'outgoing',
+          accepted: false,
+          media: { video: false },
+          overlay: null,
+          pc: null,
+          localStream: null,
+          remoteStream: null
+        });
+      }
+      return this.calls.get(token);
+    }
+
+    async startCall(token, options = {}) {
+      if (!token || !this.socket) return;
+      const call = this.ensureCall(token);
+      call.direction = 'outgoing';
+      call.media = { video: !!options.video };
+      this.showOverlay(call, { status: 'calling' });
+      this.socket.emit('direct:call:initiate', {
+        target: token,
+        media: call.media
+      });
+    }
+
+    async handleRing({ from, fromName, media }) {
+      if (!from) return;
+      const call = this.ensureCall(from);
+      call.direction = 'incoming';
+      call.media = media || { video: false };
+      this.toneManager?.play('join');
+      this.showOverlay(call, { status: 'ringing', name: fromName || getNameByToken(from) || 'Participant' });
+    }
+
+    handleCancel({ from }) {
+      const call = this.calls.get(from);
+      if (call) {
+        this.teardown(call, 'Caller cancelled');
+      }
+    }
+
+    handleResponse({ from, accepted }) {
+      const call = this.calls.get(from);
+      if (!call) return;
+      if (!accepted) {
+        this.teardown(call, 'Call declined');
+        showLiveToast(`${getNameByToken(from) || 'Participant'} declined the call`);
+        return;
+      }
+      call.accepted = true;
+      this.showOverlay(call, { status: 'connecting' });
+      this.beginNegotiation(call, true);
+    }
+
+    async acceptCall(token) {
+      if (!token || !this.socket) return;
+      const call = this.calls.get(token);
+      if (!call) return;
+      call.accepted = true;
+      this.updateOverlayActions(call);
+      this.socket.emit('direct:call:response', { target: token, accepted: true });
+      await this.beginNegotiation(call, false);
+    }
+
+    declineCall(token) {
+      if (!token || !this.socket) return;
+      const call = this.calls.get(token);
+      this.socket.emit('direct:call:response', { target: token, accepted: false });
+      if (call) {
+        this.teardown(call, 'Declined');
+      }
+    }
+
+    endCall(token) {
+      if (!token) return;
+      const call = this.calls.get(token);
+      if (call) {
+        if (call.accepted) {
+          this.socket?.emit('direct:call:end', { target: token });
+        } else {
+          this.socket?.emit('direct:call:cancel', { target: token });
+        }
+        this.teardown(call, call.accepted ? 'Call ended' : 'Call cancelled');
+      }
+    }
+
+    handleEnd({ from }) {
+      const call = this.calls.get(from);
+      if (call) {
+        this.teardown(call, 'Call ended');
+      }
+    }
+
+    async beginNegotiation(call, initiator) {
+      if (!call) return;
+      try {
+        this.showOverlay(call, { status: 'Connecting…' });
+        const pc = this.createPeer(call.token);
+        call.pc = pc;
+        const stream = await this.ensureLocalStream(call);
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        if (initiator) {
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+          await pc.setLocalDescription(offer);
+          this.socket?.emit('direct:call:signal', { target: call.token, data: { type: 'offer', sdp: offer } });
+        }
+      } catch (error) {
+        this.handleNegotiationFailure(call, error);
+      }
+    }
+
+    async ensureLocalStream(call) {
+      if (call.localStream) return call.localStream;
+      if (!this.permissionManager) {
+        throw new Error('permission-manager-missing');
+      }
+      const stream = await this.permissionManager.ensureInteractivePermissions({
+        audio: true,
+        video: call.media.video
+      });
+      if (!stream) {
+        throw new Error('media-permission-denied');
+      }
+      call.localStream = stream;
+      if (call.overlay) {
+        const video = call.overlay.querySelector('.direct-call-local');
+        if (video) video.srcObject = stream;
+      }
+      return stream;
+    }
+
+    createPeer(token) {
+      const pc = new RTCPeerConnection(this.rtcConfig);
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          this.socket?.emit('direct:call:signal', {
+            target: token,
+            data: { type: 'candidate', candidate: event.candidate }
+          });
+        }
+      };
+      pc.ontrack = (event) => {
+        const call = this.calls.get(token);
+        if (!call) return;
+        call.remoteStream = event.streams[0];
+        if (call.overlay) {
+          const remoteVideo = call.overlay.querySelector('.direct-call-remote');
+          if (remoteVideo) remoteVideo.srcObject = call.remoteStream;
+        }
+        this.showOverlay(call, { status: 'connected' });
+      };
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'failed') {
+          const call = this.calls.get(token);
+          if (call) this.teardown(call, 'Network error');
+        }
+      };
+      return pc;
+    }
+
+    async handleSignal({ from, data }) {
+      if (!from || !data) return;
+      const call = this.ensureCall(from);
+      if (!call.pc) {
+        call.pc = this.createPeer(from);
+      }
+      const pc = call.pc;
+      if (data.type === 'offer') {
+        await pc.setRemoteDescription(data.sdp);
+        const stream = await this.ensureLocalStream(call);
+        if (stream) {
+          stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        }
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        this.socket?.emit('direct:call:signal', { target: from, data: { type: 'answer', sdp: answer } });
+      } else if (data.type === 'answer') {
+        await pc.setRemoteDescription(data.sdp);
+      } else if (data.type === 'candidate') {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      }
+    }
+
+    teardown(call, reason) {
+      if (!call) return;
+      if (call.pc) {
+        call.pc.close();
+        call.pc = null;
+      }
+      if (call.localStream) {
+        call.localStream.getTracks().forEach((track) => track.stop());
+        call.localStream = null;
+      }
+      if (call.overlay && call.overlay.parentNode) {
+        call.overlay.parentNode.removeChild(call.overlay);
+      }
+      if (reason) {
+        showLiveToast(reason, { duration: 3200 });
+      }
+      this.calls.delete(call.token);
+    }
+
+    handleNegotiationFailure(call, error) {
+      if (!call) return;
+      console.error('Direct call negotiation failed', error);
+      const message = this.describeNegotiationError(error);
+      this.showOverlay(call, { status: message, variant: 'error' });
+      if (call.accepted) {
+        this.socket?.emit('direct:call:end', { target: call.token, reason: 'error' });
+      } else {
+        this.socket?.emit('direct:call:cancel', { target: call.token, reason: 'error' });
+      }
+      window.setTimeout(() => this.teardown(call, message), 1400);
+    }
+
+    describeNegotiationError(error) {
+      if (!error) return 'Call failed';
+      if (error.name === 'NotAllowedError' || error.message?.includes('permission')) {
+        return 'Allow microphone/camera access to continue';
+      }
+      if (error.name === 'NotFoundError') {
+        return 'No input devices available';
+      }
+      if (error.name === 'NotReadableError') {
+        return 'Device in use by another application';
+      }
+      return 'Call failed to connect';
+    }
+
+    showOverlay(call, { status, name, variant } = {}) {
+      if (!call) return;
+      if (!call.overlay) {
+        call.overlay = this.buildOverlay(call);
+      }
+      const overlay = call.overlay;
+      const statusEl = overlay.querySelector('.direct-call-status');
+      const titleEl = overlay.querySelector('.direct-call-title');
+      if (titleEl) {
+        const label = name || getNameByToken(call.token) || 'Participant';
+        titleEl.textContent = label;
+      }
+      if (statusEl) {
+        statusEl.textContent = status || 'Connecting';
+      }
+      const card = overlay.querySelector('.direct-call-card');
+      if (card) {
+        card.classList.toggle('error', variant === 'error');
+      }
+      overlay.classList.remove('hidden');
+      overlay.classList.add('visible');
+      this.updateOverlayActions(call);
+    }
+
+    buildOverlay(call) {
+      const overlay = document.createElement('div');
+      overlay.className = 'direct-call-overlay hidden';
+      overlay.innerHTML = `
+        <div class="direct-call-card">
+          <header>
+            <div class="direct-call-title">Connecting…</div>
+            <div class="direct-call-status">Preparing</div>
+          </header>
+          <div class="direct-call-body">
+            <video class="direct-call-remote" autoplay playsinline></video>
+            <video class="direct-call-local" autoplay playsinline muted></video>
+          </div>
+          <footer class="direct-call-actions"></footer>
+        </div>
+      `;
+      const actions = overlay.querySelector('.direct-call-actions');
+      const hangUp = document.createElement('button');
+      hangUp.type = 'button';
+      hangUp.className = 'danger';
+      hangUp.textContent = 'Hang up';
+      hangUp.dataset.role = 'hangup';
+      hangUp.addEventListener('click', () => this.endCall(call.token));
+      actions.appendChild(hangUp);
+      if (call.direction === 'incoming') {
+        const accept = document.createElement('button');
+        accept.type = 'button';
+        accept.className = 'primary';
+        accept.textContent = 'Accept';
+        accept.dataset.role = 'accept';
+        accept.addEventListener('click', () => this.acceptCall(call.token));
+        const decline = document.createElement('button');
+        decline.type = 'button';
+        decline.className = 'ghost';
+        decline.textContent = 'Decline';
+        decline.dataset.role = 'decline';
+        decline.addEventListener('click', () => this.declineCall(call.token));
+        actions.appendChild(accept);
+        actions.appendChild(decline);
+      }
+      document.body.appendChild(overlay);
+      window.setTimeout(() => overlay.classList.remove('hidden'), 10);
+      return overlay;
+    }
+
+    updateOverlayActions(call) {
+      if (!call?.overlay) return;
+      const actions = call.overlay.querySelector('.direct-call-actions');
+      if (!actions) return;
+      const acceptBtn = actions.querySelector('[data-role="accept"]');
+      const declineBtn = actions.querySelector('[data-role="decline"]');
+      const hangUpBtn = actions.querySelector('[data-role="hangup"]');
+      if (call.accepted) {
+        if (acceptBtn) acceptBtn.classList.add('hidden');
+        if (declineBtn) declineBtn.classList.add('hidden');
+        if (hangUpBtn) hangUpBtn.textContent = 'End call';
+      } else if (call.direction === 'incoming') {
+        if (acceptBtn) acceptBtn.classList.remove('hidden');
+        if (declineBtn) declineBtn.classList.remove('hidden');
+        if (hangUpBtn) hangUpBtn.textContent = 'Hang up';
+      }
+    }
+  }
+
   class PermissionManager {
     constructor({ state: stateRef, elements: elementRef, onStreamReady } = {}) {
       this.state = stateRef;
@@ -962,6 +2081,9 @@
 
   let toneManager;
   let participantManager;
+  let controlCenter;
+  let directChatManager;
+  let directCallManager;
   let chatManager;
   let permissionManager;
   let micControl;
@@ -1331,6 +2453,7 @@
       }
       elements.raisedHandsList.appendChild(li);
     });
+    controlCenter?.setHandQueue(entries);
   };
 
   const submitPollVote = async (optionId) => {
@@ -1617,6 +2740,12 @@
       elements.liveLobbyCount.textContent = state.lobby.length;
     }
     participantManager?.updateLobby(state.lobby);
+    controlCenter?.setParticipants(state.classInfo?.participants || [], {
+      lobby: state.lobby,
+      mediaStates: state.mediaStates,
+      raised: state.raisedHands,
+      quality: participantQuality
+    });
   };
 
   const renderParticipants = () => {
@@ -1624,6 +2753,13 @@
     const participants = state.classInfo.participants || [];
     elements.participantsList.innerHTML = '';
     participantManager?.updateParticipants(participants);
+    directChatManager?.setParticipants(participants);
+    controlCenter?.setParticipants(participants, {
+      lobby: state.lobby,
+      mediaStates: state.mediaStates,
+      raised: state.raisedHands,
+      quality: participantQuality
+    });
 
     const buildMediaBadge = (icon, active) => {
       const span = document.createElement('span');
@@ -2072,6 +3208,13 @@
       applyMediaState(participant.token, participant.mediaState);
     });
     participantManager?.updateParticipants(state.classInfo.participants || []);
+    directChatManager?.setParticipants(state.classInfo.participants || []);
+    controlCenter?.setParticipants(state.classInfo.participants || [], {
+      lobby: state.lobby,
+      mediaStates: state.mediaStates,
+      raised: state.raisedHands,
+      quality: participantQuality
+    });
     updateMeetingMeta();
     renderParticipants();
     renderWhiteboard();
@@ -2094,6 +3237,8 @@
   const connectSocket = () => {
     if (state.socket) return;
     state.socket = io();
+    directChatManager?.attachSocket(state.socket);
+    directCallManager?.attachSocket(state.socket);
 
     state.socket.on('connect', () => {
       connectionWatchdog?.clearFailure();
@@ -2116,11 +3261,14 @@
             state.joinToken = response.joinToken;
             persistJoinToken(state.joinToken);
           }
+          directChatManager?.setSelfToken(state.joinToken);
+          directCallManager?.setSelfToken(state.joinToken);
           hideRejoinPrompt();
           clearReconnectTimer();
           state.isHost = response.role === 'host';
           permissionManager?.configureRole(state.isHost);
           participantManager?.setIsHost(state.isHost);
+          controlCenter?.setHost(state.isHost);
           state.skipRejoinFlag = false;
           if (elements.hostControls) {
             elements.hostControls.classList.toggle('hidden', !state.isHost);
@@ -2288,6 +3436,7 @@
       }
       applyMediaState(participant.token, participant.mediaState);
       renderParticipants();
+      directChatManager?.updatePresence(participant.token, true);
       if (state.isHost) {
         createPeerConnection(participant.token, true);
       }
@@ -2354,6 +3503,7 @@
         state.classInfo.participants = state.classInfo.participants.filter((p) => p.token !== joinToken);
         renderParticipants();
       }
+      directChatManager?.updatePresence(joinToken, false);
       state.raisedHands.delete(joinToken);
       updateRaisedHandsDisplay();
       removeVideoEl(joinToken);
@@ -2417,6 +3567,28 @@
     state.socket.on('chat:remove', ({ msgId }) => {
       const el = elements.chatMessages.querySelector(`[data-id="${msgId}"]`);
       if (el) el.remove();
+    });
+
+    state.socket.on('direct:chat:new', (message) => {
+      directChatManager?.appendMessage(message);
+    });
+    state.socket.on('direct:chat:seen', ({ from, messageIds = [] }) => {
+      directChatManager?.resetCounts(from, messageIds);
+    });
+    state.socket.on('direct:call:ring', (payload) => {
+      directCallManager?.handleRing(payload);
+    });
+    state.socket.on('direct:call:cancelled', (payload) => {
+      directCallManager?.handleCancel(payload);
+    });
+    state.socket.on('direct:call:response', (payload) => {
+      directCallManager?.handleResponse(payload);
+    });
+    state.socket.on('direct:call:signal', (payload) => {
+      directCallManager?.handleSignal(payload);
+    });
+    state.socket.on('direct:call:ended', (payload) => {
+      directCallManager?.handleEnd(payload);
     });
 
     state.socket.on('participant:media', ({ joinToken, mediaState }) => {
@@ -2629,6 +3801,10 @@
     updateViewerMediaControls();
     hideLiveToast();
     closeMoreMenu();
+    participantQuality.clear();
+    peerStatsIntervals.forEach((timer) => clearInterval(timer));
+    peerStatsIntervals.clear();
+    peerStatsSamples.clear();
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -2636,6 +3812,7 @@
 
     const pc = new RTCPeerConnection(rtcConfig);
     state.peers.set(targetToken, pc);
+    updateParticipantQuality(targetToken, 'connecting');
     connectionWatchdog?.watchPeer(pc);
 
     if (state.isHost && state.localStream) {
@@ -2680,6 +3857,8 @@
       clearPeerRecovery(targetToken);
       removeVideoEl(targetToken);
       state.peers.delete(targetToken);
+      participantQuality.delete(targetToken);
+      stopPeerStatsMonitor(targetToken);
       if (targetToken === 'host' && !state.isHost) {
         state.hostMedia = { camera: null, screen: null };
         refreshStage();
@@ -2702,9 +3881,11 @@
         clearPeerRecovery(targetToken);
         verifyRemoteTracks(targetToken);
         connectionWatchdog?.clearFailure();
+        startPeerStatsMonitor(targetToken, pc);
       } else if (stateValue === 'disconnected') {
         scheduleRecovery();
         schedulePeerRecovery(targetToken, 'disconnected');
+        stopPeerStatsMonitor(targetToken);
       } else if (stateValue === 'failed') {
         schedulePeerRecovery(targetToken, 'failed');
         window.setTimeout(() => {
@@ -2717,10 +3898,13 @@
             teardownPeer();
           }
         }, 5000);
+        stopPeerStatsMonitor(targetToken);
       } else if (stateValue === 'closed') {
         clearPeerRecovery(targetToken);
         teardownPeer();
+        stopPeerStatsMonitor(targetToken);
       }
+      updateParticipantQuality(targetToken, { status: stateValue });
     };
 
     pc.onconnectionstatechange = () => {
@@ -3821,6 +5005,70 @@
         hideToast: () => hideLiveToast()
       });
     }
+    if (!controlCenter) {
+      controlCenter = new ControlCenter({
+        panelEl: elements.controlCenterPanel,
+        openButton: elements.controlCenterOpen,
+        closeButton: elements.controlCenterClose,
+        participantList: elements.controlParticipantList,
+        participantMeta: elements.controlParticipantMeta,
+        participantCount: elements.controlParticipantCount,
+        lobbyCount: elements.controlLobbyCount,
+        handQueue: elements.controlHandQueue,
+        handCount: elements.controlHandCount,
+        chatSidebar: elements.controlChatSidebar,
+        chatHeader: elements.controlChatHeader,
+        chatMessages: elements.controlChatMessages,
+        chatCount: elements.controlChatCount,
+        chatForm: elements.controlChatForm,
+        chatInput: elements.controlChatInput,
+        callAudioBtn: elements.controlCallAudio,
+        callVideoBtn: elements.controlCallVideo,
+        alertBadge: elements.controlCenterAlert
+      });
+    }
+    if (!directChatManager) {
+      directChatManager = new DirectChatManager({ socket: state.socket, controlCenter, toneManager });
+    } else {
+      directChatManager.attachSocket(state.socket);
+      directChatManager.attachControlCenter(controlCenter);
+    }
+    if (!directCallManager) {
+      directCallManager = new DirectCallManager({
+        socket: state.socket,
+        rtcConfig,
+        permissionManager,
+        toneManager
+      });
+    } else {
+      directCallManager.attachSocket(state.socket);
+      directCallManager.attachPermissionManager(permissionManager);
+    }
+    if (controlCenter) {
+      controlCenter.setCallbacks({
+        onMute: (participant, enable) => sendMediaControl(participant.token, { audio: enable }),
+        onVideo: (participant, enable) => sendMediaControl(participant.token, { video: enable }),
+        onRemove: (participant) => removeParticipant(participant.token),
+        onAllow: (participant) => allowParticipant(participant.token),
+        onLower: (participant) => lowerHand(participant.token),
+        onMessage: (token, message) => directChatManager?.sendMessage(token, message),
+        onCall: (token, media) => directCallManager?.startCall(token, media)
+      });
+      controlCenter.setHost(state.isHost);
+      controlCenter.onSelectConversation((token) => {
+        state.activeDirectChat = token;
+        directChatManager?.select(token);
+      });
+      controlCenter.onToggle((open) => {
+        state.controlCenterOpen = open;
+        if (open && state.activeDirectChat) {
+          directChatManager?.markSeen(state.activeDirectChat);
+        }
+      });
+      if (!state.activeDirectChat) {
+        controlCenter.setConversation(null, []);
+      }
+    }
   };
 
   const muteLocalTracks = () => {
@@ -4020,6 +5268,7 @@
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
     permissionManager?.configureRole(state.isHost);
     participantManager?.setIsHost(state.isHost);
+    controlCenter?.setHost(state.isHost);
     chatManager?.attachToneManager(toneManager);
     syncDrawerState();
     setStageZoom(1);

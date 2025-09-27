@@ -1600,6 +1600,21 @@ utility-panel {
   display: flex;
 }
 
+.utility-panel.control-center {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(1024px, 95vw);
+  max-width: 1024px;
+  border-radius: 0;
+  border-left: 1px solid rgba(148, 163, 184, 0.24);
+  border-right: none;
+  border-top: none;
+  border-bottom: none;
+  backdrop-filter: blur(16px);
+}
+
 .utility-header {
   display: flex;
   justify-content: space-between;
@@ -2963,3 +2978,340 @@ body.dashboard-body {
   overflow-y: auto;
 }
 }
+
+.control-center-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  padding: 0 1.5rem 2rem;
+}
+
+.control-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.control-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.control-card-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.control-card-header p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.control-badges {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.control-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+.control-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  padding: 0.75rem;
+  background: rgba(15, 17, 26, 0.65);
+}
+
+.control-list .identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.control-list .identity span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.control-list .control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.control-list .control-actions button {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.control-chat-wrapper {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1rem;
+  min-height: 360px;
+}
+
+.control-chat-sidebar {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.control-chat-sidebar button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  color: #f8fafc;
+  cursor: pointer;
+  gap: 0.75rem;
+}
+
+.control-chat-sidebar button:last-of-type {
+  border-bottom: none;
+}
+
+.control-chat-sidebar button.active {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.control-chat-sidebar .presence-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.presence-online {
+  background: #22c55e;
+}
+
+.presence-offline {
+  background: #ef4444;
+}
+
+.control-chat-thread {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.control-chat-header {
+  padding: 0.9rem 1.2rem;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.control-chat-messages {
+  flex: 1;
+  padding: 1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  overflow-y: auto;
+}
+
+.control-chat-bubble {
+  padding: 0.6rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.75);
+  max-width: 80%;
+  align-self: flex-start;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.control-chat-bubble.me {
+  background: rgba(37, 99, 235, 0.92);
+  align-self: flex-end;
+  color: #fff;
+}
+
+.control-chat-meta {
+  font-size: 0.7rem;
+  margin-top: 0.2rem;
+  color: rgba(148, 163, 184, 0.78);
+}
+
+.control-chat-form {
+  padding: 0.85rem 1.2rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.control-chat-form input {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  padding: 0.6rem 1rem;
+  background: rgba(15, 17, 26, 0.85);
+  color: #e2e8f0;
+}
+
+.control-chat-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+#control-center-alert:not(.hidden) {
+  background: #ef4444;
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.75rem;
+  margin-left: 0.35rem;
+}
+
+@media (max-width: 1024px) {
+  .control-center-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .control-chat-wrapper {
+    grid-template-columns: 1fr;
+  }
+  .control-chat-sidebar {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .control-chat-sidebar button {
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 160px;
+  }
+}
+
+
+.direct-call-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 26, 0.72);
+  backdrop-filter: blur(18px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.direct-call-overlay.visible {
+  opacity: 1;
+}
+
+.direct-call-overlay.hidden {
+  pointer-events: none;
+}
+
+.direct-call-card {
+  width: min(640px, 90vw);
+  background: rgba(15, 17, 26, 0.92);
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  color: #f8fafc;
+}
+
+.direct-call-card.error {
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow: 0 8px 40px rgba(239, 68, 68, 0.16);
+}
+
+.direct-call-card.error .direct-call-status {
+  color: #fca5a5;
+}
+
+.direct-call-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.direct-call-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.direct-call-status {
+  font-size: 0.85rem;
+  color: rgba(148, 163, 184, 0.78);
+}
+
+.direct-call-body {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+}
+
+.direct-call-body video {
+  width: 100%;
+  border-radius: 16px;
+  background: #0f172a;
+}
+
+.direct-call-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.direct-call-actions button {
+  padding: 0.6rem 1.2rem;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.direct-call-actions .danger {
+  background: #ef4444;
+  color: #fff;
+}
+
+.direct-call-actions .primary {
+  background: #2563eb;
+  color: #fff;
+}
+
+.direct-call-actions .ghost {
+  background: rgba(148, 163, 184, 0.12);
+  color: #f8fafc;
+}
+
+@media (max-width: 720px) {
+  .direct-call-card {
+    width: 95vw;
+  }
+  .direct-call-body {
+    grid-template-columns: 1fr;
+  }
+}
+

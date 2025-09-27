@@ -33,6 +33,13 @@ const participantSchema = new mongoose.Schema({
     type: String,
     default: uuid
   },
+  autoAdmit: {
+    type: Boolean,
+    default: false
+  },
+  inviteSource: {
+    type: String
+  },
   socketId: String,
   joinedAt: Date,
   mediaState: {
@@ -60,6 +67,10 @@ const lobbySchema = new mongoose.Schema({
   token: {
     type: String,
     default: uuid
+  },
+  autoAdmit: {
+    type: Boolean,
+    default: false
   },
   requestedAt: {
     type: Date,
@@ -169,6 +180,14 @@ const classSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  developerKey: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'DeveloperKey'
+  },
+  hostKey: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'HostKey'
   },
   status: {
     type: String,

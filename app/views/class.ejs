@@ -81,6 +81,10 @@
                 </svg>
               </span>
             </button>
+            <button class="header-btn" id="open-control-center" type="button" aria-label="Open control center" data-tooltip="Control center">
+              <span class="icon">⚙️</span>
+              <span class="badge hidden" id="control-center-alert"></span>
+            </button>
             <span class="status-chip live">
               <span class="dot"></span>
               Live
@@ -198,6 +202,64 @@
                   <button id="recording-stop" class="ghost small">Stop recording</button>
                 </div>
                 <div id="recording-link" class="recording-link hidden"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div id="control-center-panel" class="utility-panel hidden control-center">
+          <div class="utility-header">
+            <div>
+              <h3>Control center</h3>
+              <p>Moderate participants, chats and calls</p>
+            </div>
+            <button id="control-center-close" class="ghost small">Close</button>
+          </div>
+          <div class="control-center-grid">
+            <section class="panel-card control-column">
+              <header class="control-card-header">
+                <div>
+                  <h4>Participants</h4>
+                  <p id="control-participant-meta">0 in class • 0 waiting</p>
+                </div>
+                <div class="control-badges">
+                  <span class="badge" id="control-participant-count">0</span>
+                  <span class="badge" id="control-lobby-count">0</span>
+                </div>
+              </header>
+              <ul id="control-participant-list" class="control-list"></ul>
+            </section>
+            <section class="panel-card control-column">
+              <header class="control-card-header">
+                <div>
+                  <h4>Raised hands</h4>
+                  <p>Approve requests in order</p>
+                </div>
+                <span class="badge" id="control-hand-count">0</span>
+              </header>
+              <ul id="control-hand-queue" class="control-list"></ul>
+            </section>
+            <section class="panel-card control-column">
+              <header class="control-card-header">
+                <div>
+                  <h4>Chats &amp; calls</h4>
+                  <p>Direct messages and one-to-one</p>
+                </div>
+                <span class="badge hidden" id="control-chat-count">0</span>
+              </header>
+              <div class="control-chat-wrapper">
+                <div class="control-chat-sidebar" id="control-chat-sidebar"></div>
+                <div class="control-chat-thread">
+                  <div class="control-chat-header" id="control-chat-header">Select a participant</div>
+                  <div class="control-chat-messages" id="control-chat-messages"></div>
+                  <form id="control-chat-form" class="control-chat-form">
+                    <input type="text" id="control-chat-input" placeholder="Send a private message" autocomplete="off">
+                    <div class="control-chat-actions">
+                      <button type="button" id="control-call-audio" class="ghost small">Audio call</button>
+                      <button type="button" id="control-call-video" class="ghost small">Video call</button>
+                      <button type="submit" class="primary small">Send</button>
+                    </div>
+                  </form>
+                </div>
               </div>
             </section>
           </div>

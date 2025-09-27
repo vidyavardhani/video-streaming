@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
+const mongoose = require('mongoose');
 const ClassModel = require('../models/Class');
 const User = require('../models/User');
+const DirectChatMessage = require('../models/DirectChatMessage');
 const { register } = require('./manager');
 const {
   ensureWhiteboard,
@@ -9,6 +12,63 @@ const {
   endParticipantSession
 } = require('../utils/classState');
 const { postSystemMessage } = require('../services/chatService');
+
+const directChatStore = new Map();
+const chatStoreHydrated = new Set();
+
+const ensureChatStore = (classCode) => {
+  if (!classCode) return null;
+  if (!directChatStore.has(classCode)) {
+    directChatStore.set(classCode, new Map());
+  }
+  return directChatStore.get(classCode);
+};
+
+const serializeDirectMessage = (doc) => {
+  if (!doc) return null;
+  const payload = typeof doc.toJSON === 'function' ? doc.toJSON() : doc;
+  return {
+    id: payload.id || (payload._id ? payload._id.toString() : uuidv4()),
+    from: payload.from || payload.fromToken,
+    to: payload.to || payload.toToken,
+    senderName: payload.senderName,
+    message: payload.message,
+    media: payload.media || null,
+    createdAt: payload.createdAt,
+    updatedAt: payload.updatedAt,
+    seen: payload.seen ?? Boolean(payload.seenAt),
+    seenAt: payload.seenAt || null
+  };
+};
+
+const primeChatStore = async (classCode) => {
+  if (!classCode) return null;
+  const store = ensureChatStore(classCode);
+  if (chatStoreHydrated.has(classCode)) {
+    return store;
+  }
+  try {
+    const history = await DirectChatMessage.find({ classCode })
+      .sort({ createdAt: 1 })
+      .limit(500);
+    history.forEach((doc) => {
+      const key = doc.conversation || conversationKey(doc.fromToken, doc.toToken);
+      const existing = store.get(key) || [];
+      existing.push(serializeDirectMessage(doc));
+      store.set(key, existing.slice(-200));
+    });
+  } catch (error) {
+    console.error('primeChatStore error', error);
+  }
+  chatStoreHydrated.add(classCode);
+  return store;
+};
+
+const conversationKey = (a, b) => {
+  const first = a || 'unknown';
+  const second = b || 'unknown';
+  return [first, second].sort().join('::');
+};
 
 const decodeToken = async (token) => {
   if (!token) return null;
@@ -160,6 +220,170 @@ module.exports = (io) => {
         role: socket.data.role,
         fromToken: socket.data.token || (socket.data.role === 'host' ? 'host' : socket.id)
       });
+    });
+
+    socket.on('direct:call:initiate', ({ target, media }) => {
+      if (!target || !socket.data.classCode) return;
+      io.to(target).emit('direct:call:ring', {
+        from: socket.data.token || socket.id,
+        fromName: socket.data.name,
+        media,
+        classCode: socket.data.classCode
+      });
+    });
+
+    socket.on('direct:call:signal', ({ target, data }) => {
+      if (!target || !data || !socket.data.classCode) return;
+      io.to(target).emit('direct:call:signal', {
+        from: socket.data.token || socket.id,
+        data,
+        classCode: socket.data.classCode
+      });
+    });
+
+    socket.on('direct:call:cancel', ({ target }) => {
+      if (!target || !socket.data.classCode) return;
+      io.to(target).emit('direct:call:cancelled', {
+        from: socket.data.token || socket.id,
+        classCode: socket.data.classCode
+      });
+    });
+
+    socket.on('direct:call:response', ({ target, accepted }) => {
+      if (!target || !socket.data.classCode) return;
+      io.to(target).emit('direct:call:response', {
+        from: socket.data.token || socket.id,
+        accepted: !!accepted,
+        classCode: socket.data.classCode
+      });
+    });
+
+    socket.on('direct:call:end', ({ target }) => {
+      if (!target || !socket.data.classCode) return;
+      io.to(target).emit('direct:call:ended', {
+        from: socket.data.token || socket.id,
+        classCode: socket.data.classCode
+      });
+    });
+
+    socket.on('direct:chat:history', async ({ target, cursor, limit }, callback = () => {}) => {
+      try {
+        const store = await primeChatStore(socket.data.classCode);
+        if (!store) {
+          callback({ messages: [] });
+          return;
+        }
+        const key = conversationKey(socket.data.token || socket.id, target);
+        const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+        const query = {
+          classCode: socket.data.classCode,
+          conversation: key
+        };
+        const before = cursor ? new Date(cursor) : null;
+        if (before && !Number.isNaN(before.getTime())) {
+          query.createdAt = { $lt: before };
+        }
+        const docs = await DirectChatMessage.find(query)
+          .sort({ createdAt: -1 })
+          .limit(safeLimit + 1);
+        const hasMore = docs.length > safeLimit;
+        const slice = docs.slice(0, safeLimit);
+        const ordered = slice.reverse().map(serializeDirectMessage);
+        callback({
+          messages: ordered,
+          nextCursor: hasMore && ordered.length ? ordered[0].createdAt : null,
+          hasMore
+        });
+      } catch (error) {
+        console.error('direct:chat:history error', error);
+        callback({ error: 'Unable to load messages' });
+      }
+    });
+
+    socket.on('direct:chat:send', async ({ target, message, media }, callback = () => {}) => {
+      if (!target) {
+        callback({ error: 'target and message required' });
+        return;
+      }
+      const content = typeof message === 'string' ? message.trim() : '';
+      if (!content && !media) {
+        callback({ error: 'Message cannot be empty' });
+        return;
+      }
+      const store = await primeChatStore(socket.data.classCode);
+      if (!store) {
+        callback({ error: 'Missing session' });
+        return;
+      }
+      try {
+        const fromToken = socket.data.token || socket.id;
+        const key = conversationKey(fromToken, target);
+        const doc = await DirectChatMessage.create({
+          classCode: socket.data.classCode,
+          conversation: key,
+          fromToken,
+          toToken: target,
+          senderName: socket.data.name || 'Participant',
+          message: content,
+          media: media || null
+        });
+        const entry = serializeDirectMessage(doc);
+        const existing = store.get(key) || [];
+        existing.push(entry);
+        store.set(key, existing.slice(-200));
+        io.to(target).emit('direct:chat:new', entry);
+        socket.emit('direct:chat:new', entry);
+        callback({ message: entry });
+      } catch (error) {
+        console.error('direct:chat:send error', error);
+        callback({ error: 'Unable to send message' });
+      }
+    });
+
+    socket.on('direct:chat:seen', async ({ target, messageIds }) => {
+      if (!Array.isArray(messageIds) || !target) return;
+      const store = ensureChatStore(socket.data.classCode);
+      if (!store) return;
+      const key = conversationKey(socket.data.token || socket.id, target);
+      const messages = store.get(key) || [];
+      const idSet = new Set(messageIds);
+      let changed = false;
+      messages.forEach((msg) => {
+        if (idSet.has(msg.id) && msg.to === (socket.data.token || socket.id)) {
+          msg.seen = true;
+          msg.seenAt = new Date();
+          changed = true;
+        }
+      });
+      if (changed) {
+        store.set(key, messages);
+        const objectIds = messageIds.reduce((acc, id) => {
+          try {
+            acc.push(new mongoose.Types.ObjectId(id));
+          } catch (error) {
+            /* ignore invalid ids */
+          }
+          return acc;
+        }, []);
+        if (objectIds.length) {
+          try {
+            await DirectChatMessage.updateMany(
+              {
+                classCode: socket.data.classCode,
+                conversation: key,
+                _id: { $in: objectIds }
+              },
+              { $set: { seenAt: new Date() } }
+            );
+          } catch (error) {
+            console.error('direct:chat:seen update error', error);
+          }
+        }
+        io.to(target).emit('direct:chat:seen', {
+          from: socket.data.token || socket.id,
+          messageIds
+        });
+      }
     });
 
     socket.on('media:update', async ({ audio, video }) => {
