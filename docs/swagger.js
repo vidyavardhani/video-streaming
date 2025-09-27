@@ -1,14 +1,14 @@
 module.exports = {
-  openapi: '3.0.0',
+  openapi: '3.0.3',
   info: {
-    title: 'Video Streaming API',
+    title: 'KalpOrg Support Platform API',
     version: '1.0.0',
-    description: 'API documentation for Google Meet like live class platform'
+    description: 'REST API for chat, ticketing, analytics, and call orchestration.'
   },
   servers: [
     {
       url: 'http://localhost:4000',
-      description: 'Local server'
+      description: 'Local development server'
     }
   ],
   components: {
@@ -18,48 +18,56 @@ module.exports = {
         scheme: 'bearer',
         bearerFormat: 'JWT'
       }
+    },
+    schemas: {
+      Ticket: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string' },
+          description: { type: 'string' },
+          status: { type: 'string', enum: ['Open', 'Pending', 'Hold', 'Closed'] },
+          priority: { type: 'string', enum: ['Low', 'Medium', 'High', 'Urgent'] },
+          assignedTo: { type: 'string' }
+        }
+      }
     }
   },
-  security: [
-    {
-      bearerAuth: []
-    }
-  ],
   paths: {
     '/auth/register': {
       post: {
-        summary: 'Register a new user',
+        summary: 'Register a new support agent',
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
+                required: ['name', 'email', 'password'],
                 properties: {
                   name: { type: 'string' },
                   email: { type: 'string' },
                   password: { type: 'string' },
-                  role: { type: 'string', enum: ['teacher', 'student'] }
-                },
-                required: ['name', 'email', 'password', 'role']
+                  role: { type: 'string', enum: ['agent', 'admin'] }
+                }
               }
             }
           }
         },
         responses: {
-          201: { description: 'User created' }
+          201: { description: 'Agent registered' }
         }
       }
     },
     '/auth/login': {
       post: {
-        summary: 'Login and obtain a JWT token',
+        summary: 'Login and obtain JWT',
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
+                required: ['email', 'password'],
                 properties: {
                   email: { type: 'string' },
                   password: { type: 'string' }
@@ -69,112 +77,228 @@ module.exports = {
           }
         },
         responses: {
-          200: { description: 'Authenticated successfully' }
+          200: { description: 'Token issued' },
+          401: { description: 'Invalid credentials' }
         }
       }
     },
-    '/auth/me': {
-      get: {
-        summary: 'Get current user profile',
+    '/chat/initiate': {
+      post: {
+        summary: 'Create a customer chat session',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  customer: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      email: { type: 'string' }
+                    }
+                  },
+                  metadata: { type: 'object' },
+                  channel: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
         responses: {
-          200: { description: 'User profile returned' }
+          201: { description: 'Chat created' }
         }
       }
     },
-    '/classes': {
+    '/chat/message': {
       post: {
-        summary: 'Create a new class',
+        summary: 'Send a chat message via REST',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['sessionId', 'senderType', 'body'],
+                properties: {
+                  sessionId: { type: 'string' },
+                  senderType: { type: 'string', enum: ['agent', 'customer', 'system'] },
+                  body: { type: 'string' },
+                  metadata: { type: 'object' }
+                }
+              }
+            }
+          }
+        },
         responses: {
-          201: { description: 'Class created' }
+          201: { description: 'Message recorded' }
         }
       }
     },
-    '/classes/{code}/start': {
-      patch: {
-        summary: 'Start a class'
-      }
-    },
-    '/classes/{code}/end': {
-      patch: {
-        summary: 'End a class'
-      }
-    },
-    '/classes/{code}/join': {
+    '/ticket/create': {
       post: {
-        summary: 'Join class lobby'
+        summary: 'Create a ticket',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/Ticket' }
+            }
+          }
+        },
+        responses: {
+          201: { description: 'Ticket created' }
+        }
       }
     },
-    '/classes/{code}/admit': {
-      post: {
-        summary: 'Admit student from lobby'
+    '/ticket/{id}/status': {
+      put: {
+        summary: 'Update ticket status',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            in: 'path',
+            name: 'id',
+            required: true,
+            schema: { type: 'string' }
+          }
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['status'],
+                properties: {
+                  status: { type: 'string', enum: ['Open', 'Pending', 'Hold', 'Closed'] }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Ticket updated' }
+        }
       }
     },
-    '/classes/{code}/remove': {
-      post: {
-        summary: 'Remove participant'
-      }
-    },
-    '/classes/{code}/polls': {
-      post: {
-        summary: 'Create a class poll'
-      }
-    },
-    '/classes/{code}/polls/vote': {
-      post: {
-        summary: 'Vote in the active poll'
-      }
-    },
-    '/classes/{code}/polls/close': {
-      post: {
-        summary: 'Close the active poll'
-      }
-    },
-    '/classes/{code}/questions': {
-      post: {
-        summary: 'Submit a Q&A question'
-      }
-    },
-    '/classes/{code}/questions/{questionId}': {
-      patch: {
-        summary: 'Answer a Q&A question'
-      }
-    },
-    '/classes/{code}/whiteboard/clear': {
-      post: {
-        summary: 'Clear whiteboard strokes'
-      }
-    },
-    '/classes/{code}/recording/start': {
-      post: {
-        summary: 'Start server-side recording'
-      }
-    },
-    '/classes/{code}/recording/stop': {
-      post: {
-        summary: 'Stop recording and upload to S3'
-      }
-    },
-    '/classes/mine': {
+    '/ticket/list': {
       get: {
-        summary: 'List classes for the authenticated teacher'
+        summary: 'List tickets with optional filters',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: 'query', name: 'status', schema: { type: 'string' } },
+          { in: 'query', name: 'priority', schema: { type: 'string' } }
+        ],
+        responses: {
+          200: { description: 'Tickets returned' }
+        }
       }
     },
-    '/classes/{code}': {
-      get: {
-        summary: 'Get class details'
+    '/call/initiate': {
+      post: {
+        summary: 'Initiate a call from the agent',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['sessionId', 'offer', 'customerSessionId'],
+                properties: {
+                  sessionId: { type: 'string' },
+                  offer: { type: 'object' },
+                  customerSessionId: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          201: { description: 'Call initiated' }
+        }
       }
     },
-    '/classes/live': {
-      get: {
-        summary: 'Get live classes'
+    '/call/answer': {
+      post: {
+        summary: 'Answer a call',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['callId', 'answer'],
+                properties: {
+                  callId: { type: 'string' },
+                  answer: { type: 'object' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Call answered' }
+        }
       }
     },
-    '/chat/{code}': {
+    '/analytics/summary': {
       get: {
-        summary: 'Fetch chat history'
+        summary: 'Aggregate dashboard metrics',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: { description: 'Analytics payload' }
+        }
+      }
+    },
+    '/settings/{accountId}': {
+      get: {
+        summary: 'Fetch account settings',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            in: 'path',
+            name: 'accountId',
+            required: true,
+            schema: { type: 'string' }
+          }
+        ],
+        responses: {
+          200: { description: 'Settings returned' }
+        }
       },
-      post: {
-        summary: 'Send message'
+      put: {
+        summary: 'Update account settings',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            in: 'path',
+            name: 'accountId',
+            required: true,
+            schema: { type: 'string' }
+          }
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  businessHours: { type: 'object' },
+                  webhookIntegrations: { type: 'array', items: { type: 'object' } },
+                  defaultAgentAvailability: { type: 'boolean' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Settings updated' }
+        }
       }
     }
   }
