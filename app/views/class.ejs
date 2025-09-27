@@ -241,14 +241,17 @@
                   </svg>
                 </span>
               </button>
-                  <button id="toggle-chat" class="control-btn" type="button" aria-label="Chat" data-tooltip="Chat">
-        <span class="icon">
-          <svg viewBox="0 0 24 24" role="presentation" focusable="false">
-            <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-4.5L8 20v-4H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" 
-              fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
-          </svg>
-        </span>
-      </button>
+              <button id="toggle-chat" class="control-btn" type="button" aria-label="Chat" data-tooltip="Chat">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-4.5L8 20v-4H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"
+                      fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+                  </svg>
+                </span>
+                <span class="control-badges">
+                  <span id="chat-count-badge" class="control-badge hidden" aria-hidden="true">0</span>
+                </span>
+              </button>
 
       <!-- ✅ New Participants button directly in dock -->
       <button id="toggle-participants" class="control-btn" type="button" aria-label="Participants" data-tooltip="Participants">
@@ -257,6 +260,10 @@
             <path d="M12 12a3.5 3.5 0 1 0-3.5-3.5A3.5 3.5 0 0 0 12 12z" fill="none" stroke="currentColor" stroke-width="1.6"></path>
             <path d="M6 20v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
           </svg>
+        </span>
+        <span class="control-badges">
+          <span id="participants-count-badge" class="control-badge hidden" aria-hidden="true">0</span>
+          <span id="participants-lobby-badge" class="control-badge subtle hidden" aria-hidden="true">0</span>
         </span>
       </button>
 
@@ -371,6 +378,16 @@
                 </span>
                 <span class="text">Zoom-in</span>
               </button>
+            </div>
+            <div id="tone-settings" class="menu-section host-only" role="group" aria-label="Host settings">
+              <p class="menu-section-title">Host settings</p>
+              <label class="tone-toggle" for="tone-toggle">
+                <input type="checkbox" id="tone-toggle" class="tone-toggle-input" checked>
+                <span class="tone-toggle-track" aria-hidden="true">
+                  <span class="tone-toggle-thumb"></span>
+                </span>
+                <span class="tone-toggle-label">Notification tones</span>
+              </label>
             </div>
             <button id="rejoin-btn" class="menu-btn student-only" type="button" role="menuitem" data-tooltip="Rejoin">
               <span class="icon">
