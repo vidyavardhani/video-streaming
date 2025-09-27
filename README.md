@@ -1,68 +1,92 @@
-# Live Class Platform
+# KalpOrg Ticketing Support System
 
-This project delivers a Google Meet–style experience for teachers and students using Node.js, Express, MongoDB, Socket.IO, and WebRTC. Teachers can create and manage classes from the browser, while students join via meeting links or codes for real-time audio, video, and chat.
+A full-stack customer support platform featuring realtime chat, ticketing, analytics, WebRTC voice/video calls, a Next.js dashboard, and React Native/Web SDKs.
 
 ## Features
+- **Realtime chat** with Socket.io and automatic retry handling
+- **Ticketing workflows** with statuses (Open, Pending, Hold, Closed) and priority levels
+- **WebRTC calling** initiated by agents with offer/answer signalling
+- **Analytics dashboard** summarising chats, tickets, calls, and response times
+- **Developer SDKs** for React Native and a web widget
+- **Swagger documentation** describing REST APIs and authentication
 
-- JWT authentication with secure cookies and automatic client storage.
-- Teacher dashboard for creating, starting, ending, and opening classes.
-- Lobby workflow so students request admission before entering the live session.
-- Live WebRTC broadcasting so the host’s camera/screen share streams to admitted students.
-- In-call chat with Socket.IO updates and MongoDB persistence.
-- Swagger docs at `/docs` summarising the REST API surface.
-- Full-screen meeting stage with host-only broadcast, floating PiP, and slide-in drawers for chat and participants.
+## Monorepo structure
+```
+server.js                # Express + Socket.io entry point
+src/                     # Backend models, controllers, routes, sockets
+  models/
+  routes/
+  controllers/
+dashboard/               # Next.js App Router dashboard (Tailwind + shadcn/ui)
+sdk/react-native/        # React Native SDK source
+sdk/web/widget.js        # Lightweight web widget script
+docs/                    # Swagger spec + markdown documentation
+```
 
-## Getting Started
-
-1. **Install dependencies**
+## Getting started
+1. Install dependencies
    ```bash
    npm install
    ```
-
-2. **Configure environment**
-   Create a `.env` file (or set environment variables) with:
-   ```env
-   MONGO_URI=mongodb://127.0.0.1:27017/video-streaming
-   JWT_SECRET=super-secret-key
-   BASE_URL=http://localhost:4000
+2. Provide environment variables (see `.env.example` template below):
+   ```bash
+   cp .env.example .env
    ```
-
-3. **Run the development server**
+3. Run the API server
    ```bash
    npm run dev
    ```
+4. Launch the dashboard (requires separate install inside `dashboard/`)
+   ```bash
+   npm --prefix dashboard install
+   npm run dashboard:dev
+   ```
 
-4. **Open the app**
-   - Visit `http://localhost:4000` to register or log in.
-   - Teachers land on the dashboard to create classes.
-   - Share the class link or code with students (`/class/:id`). Students only need their name to request access.
-   - The host admits students from the lobby drawer and, once live, their camera or shared screen is broadcast to everyone.
+### .env.example
+```
+MONGO_URI=mongodb://localhost:27017/kalporg-support
+JWT_SECRET=replace-me
+CORS_ORIGIN=http://localhost:3000
+```
 
-## Usage Walkthrough
+## REST Endpoints
+Key endpoints (see `/docs` for full Swagger schema):
+- `POST /auth/login` – Agent authentication (JWT)
+- `POST /chat/initiate` – Create customer chat session
+- `POST /chat/message` – Persist chat messages
+- `POST /ticket/create` – Create ticket
+- `PUT /ticket/:id/status` – Update ticket status
+- `GET /ticket/list` – Retrieve tickets
+- `POST /call/initiate` – Start WebRTC call
+- `POST /call/answer` – Accept WebRTC call
+- `GET /analytics/summary` – Dashboard metrics
 
-1. **Teacher dashboard**
-   - Create a class to generate a human-friendly meeting code (e.g. `123-456-789`) and share the link with attendees.
-   - Start the class when you are ready to go live. The live view exposes mic, camera, screen-share, recording, and class tools.
+## SDKs
+### React Native
+```
+npm install @kalporg/support-sdk
+```
+```tsx
+import { KalpOrg } from '@kalporg/support-sdk';
 
-2. **Student join flow**
-   - Navigate to the invite link, enter a display name, and request to join. No account is required.
-   - After admission, the session connects automatically. Students see only the teacher’s video or shared screen in the full-screen stage.
+export default function App() {
+  return <KalpOrg apiKey="YOUR_API_KEY" />;
+}
+```
 
-3. **During the class**
-   - Toggle chat or participants using the header icons. Drawers slide in without disrupting the video stage and can be dismissed with a click or Escape.
-   - Screen sharing, camera toggles, and host controls instantly synchronise to all connected students via Socket.IO signalling.
-   - If a student disconnects, reconnecting with the same meeting code re-enters them in real time without a manual refresh for anyone.
+### Web Widget
+```html
+<script src="https://cdn.rapydsupport.com/widget.js" data-key="API_KEY"></script>
+```
 
-4. **Wrapping up**
-   - The host can end the session, which tears down all WebRTC peers and routes everyone to the end screen with a return-to-dashboard button.
+## Documentation
+- Swagger UI: `http://localhost:4000/docs`
+- Developer guide: [`docs/README.md`](docs/README.md)
 
-## Tech Stack
-
-- **Backend:** Node.js, Express, MongoDB, Mongoose
-- **Realtime:** Socket.IO + WebRTC (peer-to-peer fan-out from host)
-- **Frontend:** EJS templates, Vanilla JS, modern CSS
-- **Auth:** JWT (stored in HTTP-only cookie and localStorage for sockets)
+## Scripts
+- `npm run dev` – start API with Nodemon
+- `npm run dashboard:dev` – run Next.js dashboard dev server
+- `npm run sdk:build` – compile React Native SDK
 
 ## Testing
-
-Use the swagger documentation at `/docs` or Postman to exercise the API. Ensure MongoDB is running locally before starting the server.
+To be configured per deployment; recommend Jest for unit tests and Cypress for end-to-end coverage.

@@ -1,22 +1,24 @@
 {
-  "name": "video-streaming",
+  "name": "kalporg-ticketing-support",
   "version": "1.0.0",
-  "description": "Google Meet like web application for live classes",
+  "description": "KalpOrg ticketing support platform with realtime chat, calls, and analytics",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "dashboard:dev": "npm --prefix dashboard run dev",
+    "sdk:build": "npm --prefix sdk/react-native run build"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.614.0",
+    "axios": "^1.7.4",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "ejs": "^3.1.9",
     "express": "^4.19.2",
     "express-validator": "^7.0.1",
-    "@aws-sdk/client-s3": "^3.614.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^7.6.3",
     "morgan": "^1.10.0",
