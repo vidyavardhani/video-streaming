@@ -176,6 +176,126 @@ module.exports = {
       post: {
         summary: 'Send message'
       }
+    },
+    '/api/registerHost': {
+      post: {
+        summary: 'Register a host and generate developer credentials',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  email: { type: 'string' },
+                  password: { type: 'string' }
+                },
+                required: ['name', 'email', 'password']
+              }
+            }
+          }
+        },
+        responses: {
+          201: { description: 'Host registered' }
+        }
+      }
+    },
+    '/api/createClass': {
+      post: {
+        summary: 'Create a class via developer integration',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  developerKey: { type: 'string' },
+                  hostId: { type: 'string' },
+                  title: { type: 'string' }
+                },
+                required: ['developerKey', 'hostId', 'title']
+              }
+            }
+          }
+        },
+        responses: {
+          201: { description: 'Class created' }
+        }
+      }
+    },
+    '/api/purchaseCourse': {
+      post: {
+        summary: 'Register a student for automatic admission',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  studentId: { type: 'string' },
+                  classId: { type: 'string' },
+                  displayName: { type: 'string' }
+                },
+                required: ['studentId', 'classId']
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Student enrolled for auto join' }
+        }
+      }
+    },
+    '/api/startClass': {
+      post: {
+        summary: 'Start a class and auto-admit enrolled students',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  hostId: { type: 'string' },
+                  classId: { type: 'string' },
+                  developerKey: { type: 'string' }
+                },
+                required: ['hostId', 'classId']
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Class started' }
+        }
+      }
+    },
+    '/api/class/{id}/participants': {
+      get: {
+        summary: 'List participants for a class with auto-join metadata',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' }
+          }
+        ],
+        responses: {
+          200: { description: 'Participants listed' }
+        }
+      }
+    },
+    '/api/developer/summary': {
+      get: {
+        summary: 'Get developer dashboard summary',
+        responses: {
+          200: { description: 'Developer summary returned' }
+        }
+      }
     }
   }
 };

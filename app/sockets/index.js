@@ -89,7 +89,7 @@ module.exports = (io) => {
 
     socket.on('session:join', async (payload, callback = () => {}) => {
       try {
-        const { classCode: providedCode, classId, token, joinToken, displayName } = payload || {};
+        const { classCode: providedCode, classId, token, joinToken, displayName, studentId } = payload || {};
         const classCode = providedCode || classId;
         if (!classCode) {
           callback({ error: 'classCode missing' });
@@ -109,6 +109,7 @@ module.exports = (io) => {
         let role = 'lobby';
         let participantToken = joinToken;
         let participant = null;
+        const normalizedStudentId = studentId ? String(studentId) : null;
 
         if (user && klass.host.toString() === user._id.toString()) {
           role = 'host';
@@ -116,6 +117,36 @@ module.exports = (io) => {
         } else if (user) {
           participant = klass.participants.find((entry) => entry.user?.toString() === user._id.toString());
           if (participant) {
+            role = 'participant';
+            participantToken = participant.token;
+          }
+        }
+
+        if (!participant && normalizedStudentId) {
+          const rosterEntry = (klass.autoJoinRoster || []).find((entry) => entry.studentId === normalizedStudentId);
+          if (rosterEntry) {
+            if (!Array.isArray(klass.autoJoineeIds)) {
+              klass.autoJoineeIds = [];
+            }
+            if (!klass.autoJoineeIds.includes(normalizedStudentId)) {
+              klass.autoJoineeIds.push(normalizedStudentId);
+            }
+            participant = klass.participants.find(
+              (entry) => entry.autoJoinId === normalizedStudentId || entry.token === rosterEntry.joinToken
+            );
+            if (!participant) {
+              participant = {
+                displayName: rosterEntry.displayName || displayName || 'Participant',
+                token: rosterEntry.joinToken || uuidv4(),
+                autoAdmit: true,
+                autoJoinId: normalizedStudentId,
+                mediaState: { audio: false, video: false },
+                sessions: []
+              };
+              rosterEntry.joinToken = participant.token;
+              klass.participants.push(participant);
+            }
+            rosterEntry.lastJoinedAt = new Date();
             role = 'participant';
             participantToken = participant.token;
           }
@@ -157,7 +188,8 @@ module.exports = (io) => {
           role,
           userId: user ? user._id.toString() : null,
           name: user ? user.name : (participant?.displayName || displayName || 'Guest'),
-          token: participantToken || null
+          token: participantToken || null,
+          autoJoinId: normalizedStudentId
         };
 
         if (role === 'participant') {
@@ -168,9 +200,17 @@ module.exports = (io) => {
               ? participantEntry.sessions[participantEntry.sessions.length - 1]
               : null;
             participantEntry.socketId = socket.id;
-            if (!previousSession || previousSession.leftAt) {
+            if ((!previousSession || previousSession.leftAt) && klass.status === 'live') {
               startParticipantSession(participantEntry);
             }
+            if (normalizedStudentId && !participantEntry.autoJoinId) {
+              participantEntry.autoJoinId = normalizedStudentId;
+            }
+            if (normalizedStudentId) {
+              participantEntry.autoAdmit = true;
+            }
+            klass.markModified('autoJoinRoster');
+            klass.markModified('autoJoineeIds');
             await klass.save();
             if (klass.status === 'live') {
               io.to(klass.meetingCode).emit('participant:joined', {
@@ -178,7 +218,8 @@ module.exports = (io) => {
                 participant: {
                   displayName: participantEntry.displayName,
                   token: participantEntry.token,
-                  mediaState: participantEntry.mediaState || { audio: false, video: false }
+                  mediaState: participantEntry.mediaState || { audio: false, video: false },
+                  autoJoinId: participantEntry.autoJoinId
                 }
               });
             }

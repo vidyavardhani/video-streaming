@@ -192,32 +192,10 @@
           <header class="panel-head">
             <div>
               <h2>Developer access</h2>
-              <p class="panel-sub">Use this key in your mobile broadcaster to authenticate.</p>
+              <p class="panel-sub">Manage integrations, classes, and auto-join enrollment.</p>
             </div>
           </header>
-          <div class="developer-card">
-            <div>
-              <p class="developer-label">Current API key</p>
-              <code class="developer-key" id="developer-key">—</code>
-            </div>
-            <div class="developer-actions">
-              <button type="button" class="ghost" id="copy-api-key">Copy</button>
-              <button type="button" class="primary" id="regen-api-key">Generate new</button>
-            </div>
-            <p class="developer-hint">Generating a new key replaces the previous one immediately.</p>
-            <div class="developer-docs">
-              <h3>Using the key</h3>
-              <p class="developer-hint">Authenticate mobile or server calls with a bearer token.</p>
-              <ol>
-                <li>Attach <code>Authorization: Bearer &lt;API_KEY&gt;</code> to every request.</li>
-                <li>Provide the class code in your payload or path when starting sessions.</li>
-                <li>Regenerate here if the key is ever exposed.</li>
-              </ol>
-              <pre><code>curl -X PATCH \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  https://your-domain/classes/123-456-789/start</code></pre>
-            </div>
-          </div>
+          <div class="developer-card" id="developer-panel-root" data-summary-endpoint="/api/developer/summary"></div>
         </div>
       </section>
     </main>
@@ -247,5 +225,6 @@
   </div>
   <div class="dashboard-toast" id="dashboard-toast" role="status" aria-live="polite"></div>
   <script src="/public/js/dashboard.js" defer></script>
+  <script type="module" src="/public/js/developerPanel.js" defer></script>
 </body>
 </html>
