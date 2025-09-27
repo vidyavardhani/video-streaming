@@ -6,6 +6,8 @@
   const tokenKey = 'vs_token';
   const joinKey = `vs_join_${classCode}`;
   const displayNameKey = `vs_name_${classCode}`;
+  
+
 
   const safeStorage = (type) => {
     try {
@@ -1322,18 +1324,19 @@
   };
 
   const setupPreview = async () => {
-    if (state.previewReady && state.localStream) {
-      return;
-    }
-
+    if (state.previewReady && state.localStream) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      let constraints;
+      if (state.isHost) {
+        constraints = { audio: true, video: true }; // host gets camera+mic
+      } else {
+        constraints = { audio: true, video: false }; // student mic only
+      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       state.localStream = stream;
       state.previewReady = true;
       if (!state.isHost) {
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = false;
-        });
+        stream.getAudioTracks().forEach((track) => { track.enabled = false; });
       }
       if (elements.previewVideo) {
         setVideoSource(elements.previewVideo, stream, true);
@@ -1342,7 +1345,7 @@
       syncTrackButtons();
     } catch (error) {
       state.previewReady = true;
-      console.warn('Media error', error);
+      console.warn("Media error", error);
     }
   };
 
@@ -3283,6 +3286,8 @@
 
     loadChatHistory();
     updateViewerMediaControls();
+
+    
   };
 
   init();
