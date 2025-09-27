@@ -480,6 +480,7 @@
     copyLink: document.getElementById('copy-link'),
     copyCode: document.getElementById('copy-code'),
     shareInfo: document.getElementById('share-info'),
+    emailInvite: document.getElementById('email-invite'),
     chatForm: document.getElementById('chat-form'),
     chatInput: document.getElementById('chat-text'),
     chatMessages: document.getElementById('chat-messages'),
@@ -3421,6 +3422,9 @@
     if (elements.shareInfo) {
       elements.shareInfo.dataset.link = state.classInfo.meetingLink;
     }
+    if (elements.emailInvite) {
+      elements.emailInvite.dataset.link = state.classInfo.meetingLink;
+    }
     refreshStage();
   };
 
@@ -4585,6 +4589,15 @@
     showLiveToast('Invite link copied');
   });
 
+  elements.emailInvite?.addEventListener('click', (e) => {
+    const link = elements.copyLink?.dataset.link || e.currentTarget.dataset.link || window.location.href;
+    const subject = encodeURIComponent('Join my class');
+    const emailLines = ['Hi,', '', `Join the class here: ${link}`, '', 'See you there!'];
+    const body = encodeURIComponent(emailLines.join('\n'));
+    const target = `mailto:?subject=${subject}&body=${body}`;
+    window.location.href = target;
+  });
+
   elements.controlPolls?.addEventListener('click', () => {
     openUtilityPanel('polls');
   });
@@ -5254,7 +5267,7 @@
     } else {
       hostMediaSync.setWatchdog(connectionWatchdog);
     }
-    if (!controlCenter) {
+    if (!controlCenter && elements.controlCenterPanel) {
       controlCenter = new ControlCenter({
         panelEl: elements.controlCenterPanel,
         openButton: elements.controlCenterOpen,
