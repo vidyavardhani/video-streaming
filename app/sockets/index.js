@@ -242,7 +242,12 @@ module.exports = (io) => {
           participant.allowedToSpeakAt = null;
         }
         await klass.save();
-        io.to(klass.meetingCode).emit('hand:lowered', { joinToken: participant.token });
+        const loweredByHost = role === 'host' && !!targetToken;
+        io.to(klass.meetingCode).emit('hand:lowered', {
+          joinToken: participant.token,
+          loweredByHost,
+          mutedByHost: false
+        });
         callback({ success: true });
       } catch (error) {
         console.error('hand:lower error', error);
@@ -359,16 +364,28 @@ module.exports = (io) => {
           callback({ error: 'Participant not found' });
           return;
         }
-        participant.mediaState = {
+        const nextMediaState = {
           audio: typeof audio === 'boolean' ? audio : participant.mediaState?.audio !== false,
           video: typeof video === 'boolean' ? video : participant.mediaState?.video !== false
         };
+        const revokedSpeaking = typeof audio === 'boolean' && audio === false;
+        participant.mediaState = nextMediaState;
+        if (revokedSpeaking && participant.allowedToSpeakAt) {
+          participant.allowedToSpeakAt = null;
+        }
         await klass.save();
         io.to(klass.meetingCode).emit('participant:media', {
           joinToken: participant.token,
           mediaState: participant.mediaState
         });
         io.to(participant.token).emit('host:media', participant.mediaState);
+        if (revokedSpeaking) {
+          io.to(klass.meetingCode).emit('hand:lowered', {
+            joinToken: participant.token,
+            loweredByHost: true,
+            mutedByHost: true
+          });
+        }
         callback({ success: true });
       } catch (error) {
         console.error('media:control error', error);

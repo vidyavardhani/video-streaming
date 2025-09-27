@@ -91,6 +91,7 @@
     localStream: null,
     screenStream: null,
     screenSenders: [],
+    screenShareContext: null,
     peers: new Map(),
     videos: new Map(),
     lobby: [],
@@ -131,6 +132,211 @@
   };
 
   const hostTrackRegistry = new WeakSet();
+  const remoteTrackGuards = new WeakMap();
+  const remotePresence = new Map();
+  const remoteLossTimers = new Map();
+  const remoteLossCounts = new Map();
+  const peerRecovery = new Map();
+
+  const remoteLossKey = (token, label) => `${token}:${label}`;
+
+  const ensureRemotePresence = (token) => {
+    if (!remotePresence.has(token)) {
+      remotePresence.set(token, {});
+    }
+    return remotePresence.get(token);
+  };
+
+  const markRemoteTrackSeen = (token, label) => {
+    if (!token || !label) return;
+    const presence = ensureRemotePresence(token);
+    presence[label] = true;
+    clearRemoteLoss(token, label, { resetCount: true });
+  };
+
+  const clearRemoteLoss = (token, label, { resetCount = false } = {}) => {
+    if (!token || !label) return;
+    const key = remoteLossKey(token, label);
+    const timer = remoteLossTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      remoteLossTimers.delete(key);
+    }
+    if (resetCount) {
+      remoteLossCounts.delete(key);
+    }
+  };
+
+  const triggerSilentRejoin = (copy = {}) => {
+    if (state.isHost || state.rejoinScreenActive || state.rejoining) {
+      return;
+    }
+    markRejoinNeeded();
+    showRejoinScreen({
+      message: 'Connection lost. Rejoining…',
+      ...copy
+    });
+    scheduleReconnect();
+  };
+
+  const attemptPeerRecovery = (token, { iceRestart = false } = {}) => {
+    if (!token) return;
+    const pc = state.peers.get(token);
+    if (!pc) return;
+    try {
+      if (typeof pc.restartIce === 'function') {
+        pc.restartIce();
+      }
+    } catch (error) {
+      console.warn('ICE restart error', error);
+    }
+    renegotiate(pc, token, { iceRestart });
+  };
+
+  const schedulePeerRecovery = (token, cause = 'disconnected') => {
+    if (!token) return;
+    const pc = state.peers.get(token);
+    if (!pc) return;
+    const entry = peerRecovery.get(token) || { attempts: 0, timer: null };
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+    }
+    entry.attempts = Math.min(entry.attempts + 1, 6);
+    const delay = Math.min(8000, 700 * 2 ** (entry.attempts - 1));
+    entry.timer = window.setTimeout(() => {
+      entry.timer = null;
+      attemptPeerRecovery(token, { iceRestart: true });
+      const currentState = pc.connectionState;
+      const iceState = pc.iceConnectionState;
+      if (
+        (currentState === 'failed' || currentState === 'disconnected' || iceState === 'failed' || iceState === 'disconnected') &&
+        entry.attempts < 6
+      ) {
+        schedulePeerRecovery(token, cause);
+      } else if (entry.attempts >= 4) {
+        triggerSilentRejoin({ message: 'Connection unstable. Rejoining…' });
+      }
+    }, delay);
+    peerRecovery.set(token, entry);
+    connectionWatchdog?.showReconnecting(
+      cause === 'failed' ? 'Connection failed. Retrying…' : 'Connection unstable. Retrying…'
+    );
+  };
+
+  const clearPeerRecovery = (token) => {
+    const entry = peerRecovery.get(token);
+    if (!entry) return;
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+    }
+    peerRecovery.delete(token);
+  };
+
+  const isScreenTrackLabel = (track) => {
+    const label = track?.label?.toLowerCase() || '';
+    return label.includes('screen') || label.includes('display') || label.includes('window');
+  };
+
+  const scheduleRemoteLoss = (token, label, reason = 'ended') => {
+    if (state.isHost || !token || !label) return;
+    const presence = ensureRemotePresence(token);
+    if (!presence[label]) {
+      return;
+    }
+    const key = remoteLossKey(token, label);
+    clearRemoteLoss(token, label);
+    remoteLossTimers.set(
+      key,
+      window.setTimeout(() => {
+        remoteLossTimers.delete(key);
+        handleRemoteTrackLoss(token, label, reason);
+      }, 3000)
+    );
+  };
+
+  const handleRemoteTrackLoss = (token, label, reason = 'ended') => {
+    if (state.isHost) return;
+    const pc = state.peers.get(token);
+    const connectionState = pc?.connectionState || pc?.iceConnectionState;
+    if (connectionState === 'connected' || connectionState === 'completed') {
+      clearRemoteLoss(token, label, { resetCount: true });
+      return;
+    }
+    const key = remoteLossKey(token, label);
+    const attempts = (remoteLossCounts.get(key) || 0) + 1;
+    remoteLossCounts.set(key, attempts);
+    attemptPeerRecovery(token, { iceRestart: true });
+    schedulePeerRecovery(token, reason);
+    if (label.startsWith('screen')) {
+      showLiveToast('Screen share interrupted. Attempting to recover…', { duration: 2400 });
+      if (attempts >= 2) {
+        triggerSilentRejoin({ message: 'Screen share failed repeatedly. Rejoin required.' });
+      }
+    } else {
+      triggerSilentRejoin({ message: 'Lost connection to host media. Rejoining…' });
+    }
+  };
+
+  const bindRemoteTrackGuard = ({ token, label, track }) => {
+    if (state.isHost || !track || !token || !label) return;
+    if (remoteTrackGuards.has(track)) {
+      return;
+    }
+    markRemoteTrackSeen(token, label);
+    const handleMute = () => scheduleRemoteLoss(token, label, 'mute');
+    const handleUnmute = () => clearRemoteLoss(token, label);
+    const cleanup = () => {
+      track.removeEventListener('mute', handleMute);
+      track.removeEventListener('unmute', handleUnmute);
+      track.removeEventListener('ended', handleEnded);
+      track.removeEventListener('inactive', handleInactive);
+      clearRemoteLoss(token, label);
+      remoteTrackGuards.delete(track);
+    };
+    const handleEnded = () => {
+      cleanup();
+      scheduleRemoteLoss(token, label, 'ended');
+    };
+    const handleInactive = () => {
+      cleanup();
+      scheduleRemoteLoss(token, label, 'inactive');
+    };
+    track.addEventListener('mute', handleMute);
+    track.addEventListener('unmute', handleUnmute);
+    track.addEventListener('ended', handleEnded);
+    track.addEventListener('inactive', handleInactive);
+    remoteTrackGuards.set(track, cleanup);
+  };
+
+  const verifyRemoteTracks = (token) => {
+    if (state.isHost || !token) return;
+    const presence = remotePresence.get(token);
+    if (!presence) return;
+    const pc = state.peers.get(token);
+    if (!pc || typeof pc.getReceivers !== 'function') {
+      return;
+    }
+    const receivers = pc.getReceivers();
+    const videoReceivers = receivers.filter((receiver) => receiver.track && receiver.track.kind === 'video');
+    const audioReceivers = receivers.filter((receiver) => receiver.track && receiver.track.kind === 'audio');
+    const hasCameraVideo = videoReceivers.some((receiver) => receiver.track.readyState === 'live' && !isScreenTrackLabel(receiver.track));
+    const hasScreenVideo = videoReceivers.some((receiver) => receiver.track.readyState === 'live' && isScreenTrackLabel(receiver.track));
+    const hasCameraAudio = audioReceivers.some((receiver) => receiver.track.readyState === 'live' && !isScreenTrackLabel(receiver.track));
+    const hasScreenAudio = audioReceivers.some((receiver) => receiver.track.readyState === 'live' && isScreenTrackLabel(receiver.track));
+
+    if (presence['camera-video'] && !hasCameraVideo) {
+      scheduleRemoteLoss(token, 'camera-video', 'missing');
+    }
+    if (presence['screen-video'] && !hasScreenVideo) {
+      scheduleRemoteLoss(token, 'screen-video', 'missing');
+    }
+    if (presence['camera-audio'] && !hasCameraAudio) {
+      scheduleRemoteLoss(token, 'camera-audio', 'missing');
+    }
+    if (presence['screen-audio'] && !hasScreenAudio) {
+      scheduleRemoteLoss(token, 'screen-audio', 'missing');
+    }
+  };
 
   const elements = {
     joinView: document.getElementById('join-view'),
@@ -163,6 +369,7 @@
     chatForm: document.getElementById('chat-form'),
     chatInput: document.getElementById('chat-text'),
     chatMessages: document.getElementById('chat-messages'),
+    chatBadge: document.getElementById('chat-count-badge'),
     muteBtn: document.getElementById('toggle-mic'),
     cameraBtn: document.getElementById('toggle-camera'),
     liveMicToggle: document.getElementById('live-mic-toggle'),
@@ -177,6 +384,8 @@
     liveLobbyCount: document.getElementById('live-lobby-count'),
     chatToggle: document.getElementById('toggle-chat'),
     participantsToggle: document.getElementById('toggle-participants'),
+    participantsBadge: document.getElementById('participants-count-badge'),
+    lobbyBadge: document.getElementById('participants-lobby-badge'),
     chatClose: document.getElementById('chat-close'),
     participantsClose: document.getElementById('participants-close'),
     chatDrawer: document.getElementById('chat-drawer'),
@@ -224,6 +433,8 @@
     rejoinScreenBtn: document.getElementById('rejoin-screen-btn'),
     controlMore: document.getElementById('control-more'),
     controlMoreMenu: document.getElementById('control-more-menu'),
+    toneToggle: document.getElementById('tone-toggle'),
+    toneSettings: document.getElementById('tone-settings'),
     liveToast: document.getElementById('live-toast'),
     modalLayer: document.getElementById('modal-layer'),
     modalTitle: document.getElementById('modal-title'),
@@ -234,69 +445,532 @@
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-  let audioContext = null;
-  let audioUnlockRequested = false;
-  const pendingTones = [];
-
-  const ensureAudioContext = () => {
-    if (audioContext) return audioContext;
-    if (!audioUnlockRequested) return null;
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return null;
-    try {
-      audioContext = new AudioCtx();
-    } catch (error) {
-      audioContext = null;
+  class ToneManager {
+    constructor({ toggleEl, storage, storageKey = 'vs_tones_enabled' } = {}) {
+      this.toggleEl = toggleEl;
+      this.storage = storage;
+      this.storageKey = storageKey;
+      this.enabled = this.readPreference();
+      this.audioContext = null;
+      this.unlockRequested = false;
+      this.pending = [];
+      this.sequences = {
+        join: [
+          { frequency: 660, duration: 120 },
+          { frequency: 880, duration: 180 }
+        ],
+        leave: [
+          { frequency: 320, duration: 160 },
+          { frequency: 240, duration: 200 }
+        ],
+        hand: [
+          { frequency: 780, duration: 140 },
+          { frequency: 920, duration: 160 }
+        ],
+        chat: [
+          { frequency: 520, duration: 120 },
+          { frequency: 640, duration: 120 }
+        ],
+        screenStart: [
+          { frequency: 720, duration: 160 },
+          { frequency: 940, duration: 160 }
+        ],
+        screenStop: [
+          { frequency: 520, duration: 180 },
+          { frequency: 360, duration: 180 }
+        ],
+        ack: [{ frequency: 520, duration: 120 }]
+      };
+      this.bindToggle();
+      this.installUnlock();
+      this.syncToggle();
     }
-    return audioContext;
-  };
 
-  const drainPendingTones = () => {
-    if (!audioContext || !pendingTones.length) return;
-    const queue = pendingTones.splice(0);
-    queue.forEach((preset, index) => {
-      const sequence = tonePresets[preset];
-      if (!sequence) return;
-      playToneSequence(audioContext, sequence, index * 0.12);
-    });
-  };
-
-  const unlockAudio = () => {
-    audioUnlockRequested = true;
-    const ctx = ensureAudioContext();
-    if (!ctx) return;
-    if (ctx.state === 'suspended') {
-      ctx
-        .resume()
-        .then(() => {
-          drainPendingTones();
-        })
-        .catch(() => {});
-    } else {
-      drainPendingTones();
+    readPreference() {
+      const stored = storageGet(this.storage?.local, this.storageKey);
+      if (stored === '0') return false;
+      if (stored === '1') return true;
+      return true;
     }
-  };
 
-  document.addEventListener('pointerdown', unlockAudio, { once: true });
-  document.addEventListener('keydown', unlockAudio, { once: true });
+    persistPreference() {
+      if (!this.storage?.local) return;
+      storageSet(this.storage.local, this.storageKey, this.enabled ? '1' : '0');
+    }
 
-  const tonePresets = {
-    join: [
-      { frequency: 660, duration: 120 },
-      { frequency: 880, duration: 180 }
-    ],
-    leave: [
-      { frequency: 320, duration: 160 },
-      { frequency: 240, duration: 200 }
-    ],
-    hand: [
-      { frequency: 780, duration: 140 },
-      { frequency: 920, duration: 160 }
-    ],
-    chat: [
-      { frequency: 520, duration: 120 },
-      { frequency: 640, duration: 120 }
-    ]
+    bindToggle() {
+      if (!this.toggleEl) return;
+      this.toggleEl.checked = this.enabled;
+      this.toggleEl.addEventListener('change', () => {
+        this.setEnabled(this.toggleEl.checked);
+      });
+    }
+
+    installUnlock() {
+      const unlock = () => {
+        this.unlockRequested = true;
+        this.ensureAudioContext();
+        this.drainPending();
+      };
+      document.addEventListener('pointerdown', unlock, { once: true });
+      document.addEventListener('keydown', unlock, { once: true });
+    }
+
+    ensureAudioContext() {
+      if (!this.enabled) return null;
+      if (this.audioContext) return this.audioContext;
+      if (!this.unlockRequested) return null;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      try {
+        this.audioContext = new AudioCtx();
+      } catch (error) {
+        this.audioContext = null;
+      }
+      return this.audioContext;
+    }
+
+    drainPending() {
+      if (!this.pending.length) return;
+      const ctx = this.ensureAudioContext();
+      if (!ctx) return;
+      const queue = this.pending.splice(0);
+      queue.forEach((preset, index) => {
+        const sequence = this.sequences[preset];
+        if (sequence) {
+          this.playSequence(ctx, sequence, index * 0.12);
+        }
+      });
+    }
+
+    playSequence(ctx, sequence, offset = 0) {
+      if (!ctx || !sequence?.length) return;
+      let cursor = ctx.currentTime + 0.02 + offset;
+      sequence.forEach(({ frequency, duration }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(frequency, cursor);
+        gain.gain.setValueAtTime(0, cursor);
+        gain.gain.linearRampToValueAtTime(0.2, cursor + 0.02);
+        const end = cursor + duration / 1000;
+        gain.gain.exponentialRampToValueAtTime(0.0001, end);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(cursor);
+        osc.stop(end + 0.05);
+        cursor = end + 0.04;
+      });
+    }
+
+    setEnabled(value) {
+      const next = !!value;
+      if (this.enabled === next) {
+        this.syncToggle();
+        return;
+      }
+      this.enabled = next;
+      this.persistPreference();
+      this.syncToggle();
+      if (this.enabled) {
+        this.unlockRequested = true;
+        this.drainPending();
+        this.play('ack');
+      } else {
+        this.pending.length = 0;
+      }
+    }
+
+    syncToggle() {
+      if (!this.toggleEl) return;
+      this.toggleEl.checked = !!this.enabled;
+      this.toggleEl.setAttribute('aria-pressed', this.enabled.toString());
+    }
+
+    play(preset) {
+      const sequence = this.sequences[preset];
+      if (!sequence || !this.enabled) return;
+      const ctx = this.ensureAudioContext();
+      if (!ctx) {
+        if (this.pending.length > 6) {
+          this.pending.shift();
+        }
+        this.pending.push(preset);
+        return;
+      }
+      this.playSequence(ctx, sequence);
+    }
+  }
+
+  class ParticipantManager {
+    constructor({ participantsBadgeEl, lobbyBadgeEl, buttonEl } = {}) {
+      this.participantsBadgeEl = participantsBadgeEl;
+      this.lobbyBadgeEl = lobbyBadgeEl;
+      this.buttonEl = buttonEl;
+      this.isHost = false;
+      this.participants = 0;
+      this.lobby = 0;
+    }
+
+    setIsHost(flag) {
+      this.isHost = !!flag;
+      this.sync();
+    }
+
+    updateParticipants(list) {
+      const count = Array.isArray(list) ? list.length : 0;
+      this.participants = Math.max(0, count);
+      this.sync();
+    }
+
+    updateLobby(list) {
+      const count = Array.isArray(list) ? list.length : 0;
+      this.lobby = Math.max(0, count);
+      this.sync();
+    }
+
+    updateBadge(element, value, shouldShow) {
+      if (!element) return;
+      if (shouldShow) {
+        element.textContent = String(value);
+        element.classList.remove('hidden');
+      } else {
+        element.classList.add('hidden');
+      }
+    }
+
+    sync() {
+      const showHostBadges = this.isHost;
+      if (!showHostBadges) {
+        this.updateBadge(this.participantsBadgeEl, 0, false);
+        this.updateBadge(this.lobbyBadgeEl, 0, false);
+        if (this.buttonEl) {
+          this.buttonEl.setAttribute('aria-label', 'Participants');
+        }
+        return;
+      }
+      const totalParticipants = Math.max(0, this.participants + 1);
+      this.updateBadge(this.participantsBadgeEl, totalParticipants, totalParticipants > 0);
+      this.updateBadge(this.lobbyBadgeEl, this.lobby, this.lobby > 0);
+      if (this.buttonEl) {
+        const parts = [`${totalParticipants} in call`];
+        parts.push(this.lobby === 1 ? '1 waiting' : `${this.lobby} waiting`);
+        this.buttonEl.setAttribute('aria-label', `Participants (${parts.join(', ')})`);
+      }
+    }
+  }
+
+  class ChatManager {
+    constructor({ badgeEl } = {}) {
+      this.badgeEl = badgeEl;
+      this.unread = 0;
+      this.drawerOpen = false;
+      this.toneManager = null;
+    }
+
+    attachToneManager(manager) {
+      this.toneManager = manager;
+    }
+
+    setDrawerState(open) {
+      this.drawerOpen = !!open;
+      if (this.drawerOpen) {
+        this.reset();
+      }
+    }
+
+    handleNewMessage({ fromSelf = false } = {}) {
+      if (fromSelf) {
+        this.reset();
+        return;
+      }
+      if (this.drawerOpen) {
+        this.reset();
+        return;
+      }
+      this.unread += 1;
+      this.sync();
+      this.toneManager?.play('chat');
+    }
+
+    reset() {
+      if (this.unread === 0) {
+        this.sync();
+        return;
+      }
+      this.unread = 0;
+      this.sync();
+    }
+
+    sync() {
+      if (!this.badgeEl) return;
+      if (this.unread > 0) {
+        this.badgeEl.textContent = String(this.unread);
+        this.badgeEl.classList.remove('hidden');
+      } else {
+        this.badgeEl.classList.add('hidden');
+      }
+    }
+  }
+
+  class PermissionManager {
+    constructor({ state: stateRef, elements: elementRef, onStreamReady } = {}) {
+      this.state = stateRef;
+      this.elements = elementRef;
+      this.onStreamReady = onStreamReady;
+      this.isHost = false;
+      this.previewInitialized = false;
+      this.granted = { audio: false, video: false };
+    }
+
+    configureRole(isHost) {
+      this.isHost = !!isHost;
+    }
+
+    async ensurePreview() {
+      if (this.isHost) {
+        return this.ensureInteractivePermissions({ audio: true, video: true });
+      }
+      if (!this.previewInitialized && this.elements?.previewVideo) {
+        this.elements.previewVideo.srcObject = null;
+      }
+      this.previewInitialized = true;
+      return this.state?.localStream || null;
+    }
+
+    async ensureInteractivePermissions({ audio = false, video = false } = {}) {
+      if (this.isHost) {
+        return this.acquireStream({ audio: true, video: true, replace: true });
+      }
+      const needsAudio = audio && !this.granted.audio;
+      const needsVideo = video && !this.granted.video;
+      if (!needsAudio && !needsVideo && this.state?.localStream) {
+        return this.state.localStream;
+      }
+      return this.acquireStream({
+        audio: this.granted.audio || audio,
+        video: this.granted.video || video,
+        replace: true
+      });
+    }
+
+    async acquireStream({ audio = false, video = false, replace = false } = {}) {
+      if (!audio && !video) {
+        return this.state?.localStream || null;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio, video });
+        if (audio) this.granted.audio = true;
+        if (video) this.granted.video = true;
+        this.previewInitialized = true;
+        if (typeof this.onStreamReady === 'function') {
+          this.onStreamReady(stream, { replace });
+        }
+        return stream;
+      } catch (error) {
+        console.warn('Permission error', error);
+        return null;
+      }
+    }
+  }
+
+  class MediaControl {
+    constructor({ kind, state: stateRef, permissionManager: manager, setState, isEnabled, canUse, afterToggle } = {}) {
+      this.kind = kind;
+      this.state = stateRef;
+      this.permissionManager = manager;
+      this.setState = typeof setState === 'function' ? setState : () => {};
+      this.isEnabled = typeof isEnabled === 'function' ? isEnabled : () => false;
+      this.canUse = typeof canUse === 'function' ? canUse : () => true;
+      this.afterToggle = typeof afterToggle === 'function' ? afterToggle : null;
+      this.handlers = new Map();
+    }
+
+    bind(button, options = {}) {
+      if (!button || this.handlers.has(button)) return;
+      const handler = async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await this.toggle(options);
+      };
+      button.addEventListener('click', handler);
+      this.handlers.set(button, handler);
+    }
+
+    async toggle(options = {}) {
+      if (!this.canInteract(options)) return;
+      const enabled = !!this.isEnabled();
+      if (!enabled) {
+        await this.permissionManager?.ensureInteractivePermissions({
+          audio: this.kind === 'audio',
+          video: this.kind === 'video'
+        });
+        if (!this.state?.localStream) {
+          return;
+        }
+      }
+      this.setState(!enabled);
+      if (this.afterToggle) {
+        this.afterToggle(this.kind, !enabled);
+      }
+    }
+
+    canInteract(options = {}) {
+      if (this.state?.isHost) return true;
+      return !!this.canUse(this.kind, options);
+    }
+  }
+
+  class ScreenShareControl {
+    constructor({ buttonEl, onStart, onStop, toneManager: manager } = {}) {
+      this.buttonEl = buttonEl;
+      this.onStart = onStart;
+      this.onStop = onStop;
+      this.toneManager = manager;
+      this.active = false;
+      if (this.buttonEl) {
+        this.buttonEl.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.toggle();
+        });
+      }
+    }
+
+    async toggle() {
+      if (this.active) {
+        this.stop();
+      } else {
+        await this.start();
+      }
+    }
+
+    async start() {
+      if (this.active) return;
+      if (typeof this.onStart !== 'function') return;
+      const result = await this.onStart();
+      if (result) {
+        this.active = true;
+        this.toneManager?.play('screenStart');
+      }
+    }
+
+    stop() {
+      if (!this.active && typeof this.onStop !== 'function') return;
+      if (typeof this.onStop === 'function') {
+        this.onStop();
+      }
+      if (this.active) {
+        this.toneManager?.play('screenStop');
+      }
+      this.active = false;
+    }
+
+    setActive(flag) {
+      this.active = !!flag;
+    }
+  }
+
+  class ConnectionWatchdog {
+    constructor({ state: stateRef, showToast, hideToast } = {}) {
+      this.state = stateRef;
+      this.showToast = showToast;
+      this.hideToast = hideToast;
+      this.toastVisible = false;
+      this.failureTimer = null;
+      this.retryHandler = null;
+    }
+
+    watchPeer(pc) {
+      if (!pc) return;
+      pc.addEventListener('connectionstatechange', () => {
+        this.handlePeerState(pc.connectionState);
+      });
+      pc.addEventListener('iceconnectionstatechange', () => {
+        this.handlePeerState(pc.connectionState || pc.iceConnectionState);
+      });
+    }
+
+    handlePeerState(status) {
+      if (status === 'connected' || status === 'completed') {
+        this.clearFailure();
+        this.clearToast();
+      } else if (status === 'failed') {
+        this.showReconnecting('Connection unstable. Retrying…');
+      } else if (status === 'disconnected') {
+        this.showReconnecting('Attempting to reconnect…');
+      }
+    }
+
+    showReconnecting(message = 'Reconnecting…') {
+      if (typeof this.showToast === 'function') {
+        this.showToast(message, { duration: 0 });
+      }
+      this.toastVisible = true;
+    }
+
+    notifySocketDrop() {
+      this.showReconnecting('Connection lost. Reconnecting…');
+    }
+
+    notifySocketRecovered() {
+      this.clearFailure();
+      this.clearToast();
+    }
+
+    notifyFailure(callback) {
+      this.toastVisible = true;
+      this.retryHandler = callback;
+      if (typeof this.showToast === 'function') {
+        this.showToast('Unable to reconnect. Retry?', {
+          actionLabel: 'Retry',
+          onAction: () => {
+            if (typeof this.retryHandler === 'function') {
+              this.retryHandler();
+            }
+          },
+          duration: 0
+        });
+      }
+    }
+
+    clearToast() {
+      if (!this.toastVisible) return;
+      this.toastVisible = false;
+      if (typeof this.hideToast === 'function') {
+        this.hideToast();
+      }
+    }
+
+    armFailure(callback, timeout = 6500) {
+      if (this.failureTimer) {
+        clearTimeout(this.failureTimer);
+      }
+      this.retryHandler = callback;
+      this.failureTimer = window.setTimeout(() => {
+        this.failureTimer = null;
+        this.notifyFailure(callback);
+      }, timeout);
+    }
+
+    clearFailure() {
+      if (this.failureTimer) {
+        clearTimeout(this.failureTimer);
+        this.failureTimer = null;
+      }
+    }
+  }
+
+  let toneManager;
+  let participantManager;
+  let chatManager;
+  let permissionManager;
+  let micControl;
+  let cameraControl;
+  let screenShareControl;
+  let connectionWatchdog;
+
+  const playTone = (preset) => {
+    toneManager?.play(preset);
   };
 
   const FOCUSABLE_SELECTOR = [
@@ -372,39 +1046,6 @@
         });
       }
     };
-  };
-
-  const playToneSequence = (ctx, sequence, offset = 0) => {
-    if (!ctx || !sequence?.length) return;
-    let cursor = ctx.currentTime + 0.02 + offset;
-    sequence.forEach(({ frequency, duration }) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(frequency, cursor);
-      gain.gain.setValueAtTime(0, cursor);
-      gain.gain.linearRampToValueAtTime(0.18, cursor + 0.02);
-      const end = cursor + duration / 1000;
-      gain.gain.exponentialRampToValueAtTime(0.0001, end);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(cursor);
-      osc.stop(end + 0.05);
-      cursor = end + 0.04;
-    });
-  };
-
-  const playTone = (preset) => {
-    const sequence = tonePresets[preset];
-    if (!sequence) return;
-    const ctx = ensureAudioContext();
-    if (!ctx) {
-      pendingTones.push(preset);
-      if (pendingTones.length > 6) {
-        pendingTones.shift();
-      }
-      return;
-    }
-    playToneSequence(ctx, sequence);
   };
 
   const getStoredToken = () => storageGet(storage.local, tokenKey);
@@ -506,6 +1147,7 @@
     if (elements.participantsToggle) {
       elements.participantsToggle.setAttribute('aria-pressed', (state.activeDrawer === 'participants').toString());
     }
+    chatManager?.setDrawerState(state.activeDrawer === 'chat');
   };
 
   const openDrawer = (name) => {
@@ -974,12 +1616,14 @@
       }
       elements.liveLobbyCount.textContent = state.lobby.length;
     }
+    participantManager?.updateLobby(state.lobby);
   };
 
   const renderParticipants = () => {
     if (!elements.participantsList || !state.classInfo) return;
     const participants = state.classInfo.participants || [];
     elements.participantsList.innerHTML = '';
+    participantManager?.updateParticipants(participants);
 
     const buildMediaBadge = (icon, active) => {
       const span = document.createElement('span');
@@ -1141,6 +1785,52 @@
     }
   };
 
+  const applyLocalStream = (stream, { replace = false } = {}) => {
+    if (!stream) return;
+    if (replace && state.localStream && state.localStream !== stream) {
+      state.localStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch (error) {
+          /* ignore stop errors */
+        }
+      });
+    }
+    state.localStream = stream;
+    state.previewReady = true;
+    if (!state.isHost) {
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = !!state.canUseMedia.audio;
+      });
+      stream.getVideoTracks().forEach((track) => {
+        track.enabled = !!state.canUseMedia.video;
+      });
+    }
+    if (elements.previewVideo) {
+      setVideoSource(elements.previewVideo, stream, true);
+    }
+    refreshStage();
+    syncTrackButtons();
+    state.peers.forEach((pc) => {
+      const senders = pc.getSenders();
+      stream.getTracks().forEach((track) => {
+        const sender = senders.find((item) => item.track && item.track.kind === track.kind);
+        if (sender && typeof sender.replaceTrack === 'function') {
+          sender
+            .replaceTrack(track)
+            .catch((error) => console.warn('replaceTrack error', error));
+        } else {
+          try {
+            pc.addTrack(track, stream);
+          } catch (error) {
+            console.warn('addTrack error', error);
+          }
+        }
+      });
+    });
+    emitMediaUpdate();
+  };
+
   const updatePrimaryStream = (stream, label, muted = false) => {
     if (!elements.primaryVideo) return;
     if (stream) {
@@ -1260,6 +1950,7 @@
       showSpeakerBanner('host', 'screen');
     }
     stream.getVideoTracks().forEach((track) => {
+      bindRemoteTrackGuard({ token: 'host', label: `${key}-video`, track });
       if (hostTrackRegistry.has(track)) {
         return;
       }
@@ -1269,6 +1960,10 @@
         track.removeEventListener('mute', updateStage);
         track.removeEventListener('unmute', updateStage);
         track.removeEventListener('ended', handleEnded);
+        const cleanup = remoteTrackGuards.get(track);
+        if (typeof cleanup === 'function') {
+          cleanup();
+        }
         if (state.hostMedia[key] === stream) {
           state.hostMedia[key] = null;
         }
@@ -1280,6 +1975,9 @@
       track.addEventListener('mute', updateStage);
       track.addEventListener('unmute', updateStage);
       track.addEventListener('ended', handleEnded);
+    });
+    stream.getAudioTracks().forEach((track) => {
+      bindRemoteTrackGuard({ token: 'host', label: `${key}-audio`, track });
     });
     refreshStage();
   };
@@ -1323,27 +2021,17 @@
 
   const setupPreview = async () => {
     if (state.previewReady && state.localStream) {
-      return;
+      return state.localStream;
     }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      state.localStream = stream;
-      state.previewReady = true;
-      if (!state.isHost) {
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = false;
-        });
-      }
-      if (elements.previewVideo) {
-        setVideoSource(elements.previewVideo, stream, true);
-      }
-      refreshStage();
-      syncTrackButtons();
-    } catch (error) {
-      state.previewReady = true;
-      console.warn('Media error', error);
+    state.previewReady = true;
+    if (!permissionManager) {
+      return state.localStream || null;
     }
+    const stream = await permissionManager.ensurePreview();
+    if (stream && !state.localStream) {
+      applyLocalStream(stream, { replace: true });
+    }
+    return state.localStream || stream || null;
   };
 
   const updateMeetingMeta = () => {
@@ -1383,6 +2071,7 @@
     (state.classInfo.participants || []).forEach((participant) => {
       applyMediaState(participant.token, participant.mediaState);
     });
+    participantManager?.updateParticipants(state.classInfo.participants || []);
     updateMeetingMeta();
     renderParticipants();
     renderWhiteboard();
@@ -1407,6 +2096,8 @@
     state.socket = io();
 
     state.socket.on('connect', () => {
+      connectionWatchdog?.clearFailure();
+      connectionWatchdog?.notifySocketRecovered();
       state.socket.emit(
         'session:join',
         {
@@ -1428,6 +2119,8 @@
           hideRejoinPrompt();
           clearReconnectTimer();
           state.isHost = response.role === 'host';
+          permissionManager?.configureRole(state.isHost);
+          participantManager?.setIsHost(state.isHost);
           state.skipRejoinFlag = false;
           if (elements.hostControls) {
             elements.hostControls.classList.toggle('hidden', !state.isHost);
@@ -1500,6 +2193,7 @@
     const handleSocketDrop = (reason) => {
       const classIsLive = state.classInfo?.status === 'live';
       state.skipRejoinFlag = false;
+      connectionWatchdog?.notifySocketDrop();
       if (classIsLive) {
         markRejoinNeeded();
       }
@@ -1533,6 +2227,7 @@
     state.socket.on('lobby:update', ({ lobby }) => {
       if (!Array.isArray(lobby)) return;
       state.lobby = lobby;
+      participantManager?.updateLobby(state.lobby);
       renderLobby();
     });
 
@@ -1638,6 +2333,7 @@
       updateRaisedHandsDisplay();
       if (state.isHost) {
         state.lobby = state.lobby.filter((entry) => entry.token !== joinToken);
+        participantManager?.updateLobby(state.lobby);
         renderLobby();
       }
       removeVideoEl(joinToken);
@@ -1714,11 +2410,9 @@
     });
 
     state.socket.on('chat:new', (message) => {
-      const foreignMessage = message?.joinToken && message.joinToken !== state.joinToken;
-      if (foreignMessage) {
-        playTone('chat');
-      }
+      const fromSelf = message?.joinToken === state.joinToken;
       appendMessage(message);
+      chatManager?.handleNewMessage({ fromSelf });
     });
     state.socket.on('chat:remove', ({ msgId }) => {
       const el = elements.chatMessages.querySelector(`[data-id="${msgId}"]`);
@@ -1764,20 +2458,30 @@
       }
     });
 
-    state.socket.on('hand:lowered', ({ joinToken }) => {
+    state.socket.on('hand:lowered', ({ joinToken, loweredByHost = false, mutedByHost = false } = {}) => {
       updateParticipantState(joinToken, { handRaisedAt: null });
       state.raisedHands.delete(joinToken);
       renderParticipants();
       if (joinToken === state.joinToken) {
         state.handRaised = false;
-        state.canUseMedia = { audio: false, video: false };
-        muteLocalTracks();
+        if (mutedByHost || loweredByHost) {
+          state.canUseMedia = { audio: false, video: false };
+          muteLocalTracks();
+        }
         updateHandRaiseButton();
         updateViewerMediaControls();
+        if (mutedByHost) {
+          showLiveToast('Host muted you. Raise your hand to speak again.');
+        } else if (loweredByHost) {
+          showLiveToast('Host declined your request. You can raise your hand again when ready.');
+        }
+      }
+      if (state.isHost) {
+        updateRaisedHandsDisplay();
       }
     });
 
-    state.socket.on('hand:allowed', ({ joinToken }) => {
+    state.socket.on('hand:allowed', async ({ joinToken }) => {
       updateParticipantState(joinToken, { handRaisedAt: null, allowedToSpeakAt: new Date().toISOString() });
       state.raisedHands.delete(joinToken);
       renderParticipants();
@@ -1786,20 +2490,34 @@
         state.canUseMedia = { audio: true, video: true };
         updateHandRaiseButton();
         updateViewerMediaControls();
+        try {
+          await permissionManager?.ensureInteractivePermissions({ audio: true, video: true });
+        } catch (error) {
+          console.error('Failed to enable media permissions after approval', error);
+        }
+        showLiveToast('Host approved your request. You can speak now.');
       }
     });
 
-    state.socket.on('host:allow-speak', () => {
+    state.socket.on('host:allow-speak', async () => {
       state.handRaised = false;
       state.canUseMedia = { audio: true, video: true };
       updateHandRaiseButton();
-      applyHostMediaState({ audio: true });
+      try {
+        await applyHostMediaState({ audio: true });
+      } catch (error) {
+        console.error('Failed to apply host media state after allow-speak', error);
+      }
       updateViewerMediaControls();
       alert('The host allowed you to speak. Your microphone is enabled.');
     });
 
-    state.socket.on('host:media', (mediaState) => {
-      applyHostMediaState(mediaState);
+    state.socket.on('host:media', async (mediaState) => {
+      try {
+        await applyHostMediaState(mediaState);
+      } catch (error) {
+        console.error('Failed to apply host media state update', error);
+      }
       if (!state.isHost && mediaState) {
         if (typeof mediaState.audio === 'boolean') {
           state.canUseMedia.audio = mediaState.audio !== false;
@@ -1918,6 +2636,7 @@
 
     const pc = new RTCPeerConnection(rtcConfig);
     state.peers.set(targetToken, pc);
+    connectionWatchdog?.watchPeer(pc);
 
     if (state.isHost && state.localStream) {
       state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
@@ -1958,6 +2677,7 @@
     };
 
     const teardownPeer = () => {
+      clearPeerRecovery(targetToken);
       removeVideoEl(targetToken);
       state.peers.delete(targetToken);
       if (targetToken === 'host' && !state.isHost) {
@@ -1970,60 +2690,45 @@
     };
 
     const scheduleRecovery = () => {
-      setTimeout(() => {
-        if (pc.connectionState === 'disconnected') {
-          if (typeof pc.restartIce === 'function') {
-            try {
-              pc.restartIce();
-            } catch (error) {
-              console.warn('ICE restart failed', error);
-            }
-          }
-          renegotiate(pc, targetToken);
+      window.setTimeout(() => {
+        if (pc.connectionState === 'disconnected' || pc.iceConnectionState === 'disconnected') {
+          attemptPeerRecovery(targetToken, { iceRestart: true });
         }
-      }, 750);
+      }, 600);
     };
 
-    pc.onconnectionstatechange = () => {
-      const stateValue = pc.connectionState;
-      if (stateValue === 'disconnected') {
+    const handlePeerState = (stateValue) => {
+      if (stateValue === 'connected' || stateValue === 'completed') {
+        clearPeerRecovery(targetToken);
+        verifyRemoteTracks(targetToken);
+        connectionWatchdog?.clearFailure();
+      } else if (stateValue === 'disconnected') {
         scheduleRecovery();
-      }
-      if (stateValue === 'failed') {
-        if (typeof pc.restartIce === 'function') {
-          try {
-            pc.restartIce();
-          } catch (error) {
-            console.warn('ICE restart error', error);
+        schedulePeerRecovery(targetToken, 'disconnected');
+      } else if (stateValue === 'failed') {
+        schedulePeerRecovery(targetToken, 'failed');
+        window.setTimeout(() => {
+          if (pc.connectionState === 'failed') {
+            attemptPeerRecovery(targetToken, { iceRestart: true });
           }
-        }
-        renegotiate(pc, targetToken);
-        setTimeout(() => {
+        }, 500);
+        window.setTimeout(() => {
           if (pc.connectionState === 'failed') {
             teardownPeer();
           }
-        }, 4000);
-      }
-      if (stateValue === 'closed') {
+        }, 5000);
+      } else if (stateValue === 'closed') {
+        clearPeerRecovery(targetToken);
         teardownPeer();
       }
     };
 
+    pc.onconnectionstatechange = () => {
+      handlePeerState(pc.connectionState);
+    };
+
     pc.oniceconnectionstatechange = () => {
-      const stateValue = pc.iceConnectionState;
-      if (stateValue === 'disconnected') {
-        scheduleRecovery();
-      }
-      if (stateValue === 'failed') {
-        if (typeof pc.restartIce === 'function') {
-          try {
-            pc.restartIce();
-          } catch (error) {
-            console.warn('ICE restart error', error);
-          }
-        }
-        renegotiate(pc, targetToken);
-      }
+      handlePeerState(pc.iceConnectionState);
     };
 
     if (initiator) {
@@ -2045,9 +2750,10 @@
     return pc;
   };
 
-  const renegotiate = async (pc, targetToken) => {
+  const renegotiate = async (pc, targetToken, options = {}) => {
     try {
-      const offer = await pc.createOffer();
+      const offerOptions = options.iceRestart ? { iceRestart: true } : {};
+      const offer = await pc.createOffer(offerOptions);
       await pc.setLocalDescription(offer);
       state.socket.emit('webrtc:signal', {
         classCode,
@@ -2160,6 +2866,7 @@
       if (!res.ok) return;
       const messages = await res.json();
       messages.forEach(appendMessage);
+      chatManager?.reset();
     } catch (error) {
       console.error('Chat history error', error);
     }
@@ -2186,6 +2893,7 @@
     state.socket.emit('class:lobby:update', null, (response) => {
       if (response?.lobby) {
         state.lobby = response.lobby;
+        participantManager?.updateLobby(state.lobby);
         renderLobby();
       }
     });
@@ -2240,6 +2948,8 @@
     state.rejoining = true;
     state.skipRejoinFlag = false;
     markRejoinNeeded();
+    connectionWatchdog?.showReconnecting('Rejoining…');
+    connectionWatchdog?.armFailure(() => attemptRejoin());
     if (elements.rejoinBtn) {
       elements.rejoinBtn.disabled = true;
       setButtonLabel(elements.rejoinBtn, 'Rejoining…');
@@ -2248,29 +2958,38 @@
       elements.rejoinScreenBtn.disabled = true;
       setButtonLabel(elements.rejoinScreenBtn, 'Rejoining…');
     }
-    leaveSession();
-    if (state.socket) {
-      try {
-        state.socket.disconnect();
-      } catch (error) {
-        /* ignore */
+    try {
+      leaveSession();
+      if (state.socket) {
+        try {
+          state.socket.disconnect();
+        } catch (error) {
+          /* ignore */
+        }
+        state.socket = null;
       }
-      state.socket = null;
-    }
-    if (state.isHost) {
-      connectSocket();
-      return;
-    }
-    if (state.joinToken) {
-      connectSocket();
-    } else {
-      await autoJoinWithSavedName();
+      if (state.isHost) {
+        connectSocket();
+        return;
+      }
+      if (state.joinToken) {
+        connectSocket();
+      } else {
+        await autoJoinWithSavedName();
+      }
+    } catch (error) {
+      console.error('Rejoin attempt error', error);
+      state.rejoining = false;
+      connectionWatchdog?.notifyFailure(() => attemptRejoin());
+      resetRejoinButtons();
     }
   };
 
   const handleRejoinSuccess = (response) => {
     const statusFromResponse = response?.classStatus;
     state.rejoining = false;
+    connectionWatchdog?.clearFailure();
+    connectionWatchdog?.notifySocketRecovered();
     const refreshAndResume = async () => {
       try {
         await loadClass();
@@ -2620,6 +3339,7 @@
     });
     if (res.ok) {
       elements.chatInput.value = '';
+      chatManager?.reset();
     }
   });
 
@@ -2714,7 +3434,7 @@
 
   const showLiveToast = (message, options = {}) => {
     if (!elements.liveToast || !message) return;
-    const { actionLabel, onAction } = options;
+    const { actionLabel, onAction, duration = 2600 } = options;
     if (state.toastActionButton) {
       state.toastActionButton.removeEventListener('click', state.toastActionHandler);
       state.toastActionButton = null;
@@ -2739,10 +3459,14 @@
     if (state.toastTimer) {
       clearTimeout(state.toastTimer);
     }
-    state.toastTimer = window.setTimeout(() => {
-      elements.liveToast.classList.remove('show');
+    if (duration > 0) {
+      state.toastTimer = window.setTimeout(() => {
+        elements.liveToast.classList.remove('show');
+        state.toastTimer = null;
+      }, duration);
+    } else {
       state.toastTimer = null;
-    }, 2600);
+    }
   };
 
   const hideLiveToast = () => {
@@ -2914,6 +3638,8 @@
   const scheduleReconnect = (force = false) => {
     if (state.reconnectTimer) return;
     if (!force && state.isHost) return;
+    connectionWatchdog?.showReconnecting('Reconnecting…');
+    connectionWatchdog?.armFailure(() => attemptRejoin());
     state.reconnectTimer = window.setTimeout(() => {
       state.reconnectTimer = null;
       attemptRejoin();
@@ -3023,6 +3749,80 @@
     return changed;
   };
 
+  const initializeComponents = () => {
+    if (!toneManager) {
+      toneManager = new ToneManager({ toggleEl: elements.toneToggle, storage });
+    }
+    if (!participantManager) {
+      participantManager = new ParticipantManager({
+        participantsBadgeEl: elements.participantsBadge,
+        lobbyBadgeEl: elements.lobbyBadge,
+        buttonEl: elements.participantsToggle
+      });
+    }
+    if (!chatManager) {
+      chatManager = new ChatManager({ badgeEl: elements.chatBadge });
+    }
+    chatManager?.attachToneManager(toneManager);
+    if (!permissionManager) {
+      permissionManager = new PermissionManager({
+        state,
+        elements,
+        onStreamReady: (stream, options = {}) => applyLocalStream(stream, options)
+      });
+    }
+    const canUseMedia = (kind) => {
+      if (state.isHost) return true;
+      const key = kind === 'video' ? 'video' : 'audio';
+      return !!state.canUseMedia?.[key];
+    };
+    if (!micControl) {
+      micControl = new MediaControl({
+        kind: 'audio',
+        state,
+        permissionManager,
+        setState: (value) => setMediaTrackState('audio', value),
+        isEnabled: () => isTrackEnabled('audio'),
+        canUse: () => canUseMedia('audio'),
+        afterToggle: () => {
+          if (!state.isHost) {
+            updateViewerMediaControls();
+          }
+        }
+      });
+    }
+    if (!cameraControl) {
+      cameraControl = new MediaControl({
+        kind: 'video',
+        state,
+        permissionManager,
+        setState: (value) => setMediaTrackState('video', value),
+        isEnabled: () => isTrackEnabled('video'),
+        canUse: () => canUseMedia('video'),
+        afterToggle: () => {
+          if (!state.isHost) {
+            updateViewerMediaControls();
+          }
+        }
+      });
+    }
+    if (!screenShareControl) {
+      screenShareControl = new ScreenShareControl({
+        buttonEl: elements.screenShareBtn,
+        onStart: startScreenShare,
+        onStop: stopScreenShare,
+        toneManager
+      });
+    }
+    if (!connectionWatchdog) {
+      connectionWatchdog = new ConnectionWatchdog({
+        state,
+        showToast: (message, opts = {}) => showLiveToast(message, opts),
+        hideToast: () => hideLiveToast()
+      });
+    }
+  };
+
   const muteLocalTracks = () => {
     if (!state.localStream) return;
     const audioChanged = setMediaTrackState('audio', false, {
@@ -3043,8 +3843,17 @@
     }
   };
 
-  const applyHostMediaState = (media) => {
-    if (!state.localStream || !media) return;
+  const applyHostMediaState = async (media) => {
+    if (!media) return;
+    if (!state.localStream) {
+      if (permissionManager) {
+        await permissionManager.ensureInteractivePermissions({
+          audio: media.audio === true,
+          video: media.video === true
+        });
+      }
+      return;
+    }
     let shouldEmit = false;
     if (typeof media.audio === 'boolean') {
       shouldEmit = setMediaTrackState('audio', media.audio, {
@@ -3076,6 +3885,45 @@
     setMediaTrackState(kind, nextState);
   };
 
+  const startScreenShare = async () => {
+    if (!state.isHost) return false;
+    if (state.screenStream) return true;
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: { echoCancellation: false, noiseSuppression: false }
+      });
+      state.screenShareContext = {
+        micEnabled: isTrackEnabled('audio')
+      };
+      state.screenStream = displayStream;
+      refreshStage();
+      state.screenSenders = [];
+      const tracks = displayStream.getTracks();
+      state.peers.forEach((pc, token) => {
+        tracks.forEach((track) => {
+          const sender = pc.addTrack(track, displayStream);
+          state.screenSenders.push({ pc, sender, token, track });
+        });
+        renegotiate(pc, token);
+      });
+      if (elements.screenShareBtn) {
+        setButtonLabel(elements.screenShareBtn, 'Stop sharing');
+        elements.screenShareBtn.setAttribute('aria-label', 'Stop screen share');
+      }
+      tracks.forEach((track) => {
+        track.addEventListener('ended', () => {
+          screenShareControl?.stop();
+        });
+      });
+      return true;
+    } catch (error) {
+      console.error('Screen share error', error);
+      showLiveToast('Unable to start screen share');
+      return false;
+    }
+  };
+
   const stopScreenShare = () => {
     if (!state.screenStream) return;
     state.screenSenders.forEach(({ pc, sender, token }) => {
@@ -3090,10 +3938,16 @@
     stopStream(state.screenStream);
     state.screenStream = null;
     refreshStage();
+    const context = state.screenShareContext;
+    state.screenShareContext = null;
+    if (context && typeof context.micEnabled === 'boolean') {
+      setMediaTrackState('audio', context.micEnabled, { suppressBanner: true });
+    }
     if (elements.screenShareBtn) {
-    setButtonLabel(elements.screenShareBtn, 'Share screen');
+      setButtonLabel(elements.screenShareBtn, 'Share screen');
       elements.screenShareBtn.setAttribute('aria-label', 'Start screen share');
     }
+    screenShareControl?.setActive(false);
     if (state.activeSpeaker === 'host') {
       hideSpeakerBanner();
     }
@@ -3113,64 +3967,16 @@
   };
 
   const bindTrackToggles = () => {
-    if (!state.isHost) return;
-    elements.muteBtn?.addEventListener('click', () => toggleTrack('audio'));
-    elements.cameraBtn?.addEventListener('click', () => toggleTrack('video'));
-    elements.liveMicToggle?.addEventListener('click', () => toggleTrack('audio'));
-    elements.liveCameraToggle?.addEventListener('click', () => toggleTrack('video'));
+    micControl?.bind(elements.muteBtn);
+    micControl?.bind(elements.liveMicToggle);
+    cameraControl?.bind(elements.cameraBtn);
+    cameraControl?.bind(elements.liveCameraToggle);
   };
 
   const bindViewerControls = () => {
-    if (state.isHost) return;
-    elements.viewerMicToggle?.addEventListener('click', () => {
-      if (!state.canUseMedia.audio) return;
-      const nextState = !isTrackEnabled('audio');
-      setMediaTrackState('audio', nextState);
-      updateViewerMediaControls();
-    });
-    elements.viewerCameraToggle?.addEventListener('click', () => {
-      if (!state.canUseMedia.video) return;
-      const nextState = !isTrackEnabled('video');
-      setMediaTrackState('video', nextState, { suppressBanner: true });
-      updateViewerMediaControls();
-    });
+    micControl?.bind(elements.viewerMicToggle, { viewer: true });
+    cameraControl?.bind(elements.viewerCameraToggle, { viewer: true });
   };
-
-  elements.screenShareBtn?.addEventListener('click', async () => {
-    if (!state.isHost) return;
-    if (state.screenStream) {
-      stopScreenShare();
-      return;
-    }
-    try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true
-      });
-      state.screenStream = displayStream;
-      refreshStage();
-      state.screenSenders = [];
-      const tracks = displayStream.getTracks();
-      state.peers.forEach((pc, token) => {
-        tracks.forEach((track) => {
-          const sender = pc.addTrack(track, displayStream);
-          state.screenSenders.push({ pc, sender, token, track });
-        });
-        renegotiate(pc, token);
-      });
-      if (elements.screenShareBtn) {
-        setButtonLabel(elements.screenShareBtn, 'Stop sharing');
-        elements.screenShareBtn.setAttribute('aria-label', 'Stop screen share');
-      }
-      displayStream.getTracks().forEach((track) => {
-        track.addEventListener('ended', () => {
-          stopScreenShare();
-        });
-      });
-    } catch (error) {
-      console.error('Screen share error', error);
-    }
-  });
 
   elements.stageZoomIn?.addEventListener('click', () => {
     setStageZoom(state.stageZoom + 0.1);
@@ -3208,9 +4014,13 @@
 
   const init = async () => {
     hideRejoinPrompt();
+    initializeComponents();
     await loadClass();
     await loadUser();
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
+    permissionManager?.configureRole(state.isHost);
+    participantManager?.setIsHost(state.isHost);
+    chatManager?.attachToneManager(toneManager);
     syncDrawerState();
     setStageZoom(1);
     document.body.classList.toggle('is-host', !!state.isHost);
@@ -3236,6 +4046,7 @@
     bindTrackToggles();
     bindViewerControls();
     state.lobby = state.classInfo.lobby || [];
+    participantManager?.updateLobby(state.lobby);
     updateHandRaiseButton();
     if (elements.endButton) {
       elements.endButton.classList.toggle('hidden', !state.isHost);
