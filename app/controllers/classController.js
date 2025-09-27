@@ -8,6 +8,7 @@ const {
   startParticipantSession,
   endParticipantSession
 } = require('../utils/classState');
+const { upsertAutoJoinEntry, syncAutoJoinees } = require('../utils/autoJoin');
 const recordingService = require('../services/recordingService');
 const { postSystemMessage } = require('../services/chatService');
 
@@ -81,6 +82,7 @@ const publicClassShape = (klass) => {
       displayName: entry.displayName,
       token: entry.token,
       joinedAt: entry.joinedAt,
+      autoJoinId: entry.autoJoinId,
       mediaState: entry.mediaState || { audio: false, video: false },
       handRaisedAt: entry.handRaisedAt,
       allowedToSpeakAt: entry.allowedToSpeakAt,
@@ -90,6 +92,7 @@ const publicClassShape = (klass) => {
     attendance: participantEntries.map((entry) => ({
       displayName: entry.displayName,
       token: entry.token,
+      autoJoinId: entry.autoJoinId,
       sessions: entry.sessions || [],
       expelledAt: entry.expelledAt
     })),
@@ -98,7 +101,14 @@ const publicClassShape = (klass) => {
     pollHistory: klass.pollHistory || [],
     questions: klass.questions || [],
     recording: klass.recording || { isRecording: false },
-    recordedVideoLink: klass.recordedVideoLink || null
+    recordedVideoLink: klass.recordedVideoLink || null,
+    autoJoineeIds: Array.isArray(klass.autoJoineeIds) ? klass.autoJoineeIds : [],
+    autoJoinRoster: (klass.autoJoinRoster || []).map((entry) => ({
+      studentId: entry.studentId,
+      displayName: entry.displayName,
+      joinToken: entry.joinToken,
+      lastJoinedAt: entry.lastJoinedAt
+    }))
   };
 };
 
@@ -152,9 +162,32 @@ exports.start = async (req, res) => {
     ensureWhiteboard(klass);
     klass.status = 'live';
     klass.startTime = new Date();
+    const autoJoined = syncAutoJoinees(klass, { live: true });
+    klass.markModified('autoJoinRoster');
+    klass.markModified('participants');
+    klass.markModified('autoJoineeIds');
     await klass.save();
 
-    getIO().to(klass.meetingCode).emit('class:started', { classCode: klass.meetingCode });
+    const io = getIO();
+    io.to(klass.meetingCode).emit('class:started', {
+      classCode: klass.meetingCode,
+      autoJoinees: autoJoined.map((participant) => ({
+        displayName: participant.displayName,
+        token: participant.token,
+        autoJoinId: participant.autoJoinId
+      }))
+    });
+    autoJoined.forEach((participant) => {
+      io.to(klass.meetingCode).emit('participant:joined', {
+        classCode: klass.meetingCode,
+        participant: {
+          displayName: participant.displayName,
+          token: participant.token,
+          mediaState: participant.mediaState || { audio: false, video: false },
+          autoJoinId: participant.autoJoinId
+        }
+      });
+    });
 
     return res.json({ message: 'Class started', class: publicClassShape(await klass.populate('host')) });
   } catch (error) {
@@ -221,6 +254,32 @@ exports.join = async (req, res) => {
     const displayName = req.body.displayName?.trim();
     if (!displayName) {
       return res.status(400).json({ message: 'Display name is required' });
+    }
+
+    const studentId = req.body.studentId ? String(req.body.studentId) : null;
+    if (studentId) {
+      const rosterEntry = upsertAutoJoinEntry(klass, { studentId, displayName });
+      const live = klass.status === 'live';
+      if (live) {
+        syncAutoJoinees(klass, { live: true });
+      }
+      klass.markModified('autoJoinRoster');
+      klass.markModified('autoJoineeIds');
+      if (live) {
+        klass.markModified('participants');
+      }
+      await klass.save();
+      const participant = live
+        ? klass.participants.find((entry) => entry.autoJoinId === rosterEntry.studentId)
+        : null;
+      return res.json({
+        message: live ? 'Admitted' : 'Registered for automatic admission',
+        joinToken: participant?.token || rosterEntry.joinToken,
+        participant: participant
+          ? { displayName: participant.displayName, token: participant.token }
+          : { displayName: rosterEntry.displayName },
+        autoJoin: true
+      });
     }
 
     const providedToken = req.body.joinToken?.trim()

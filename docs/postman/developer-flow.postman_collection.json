@@ -1,0 +1,110 @@
+{
+  "info": {
+    "name": "Developer Auto Join Flow",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Register Host",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Sample Host\",\n  \"email\": \"host@example.com\",\n  \"password\": \"strong-password\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/registerHost",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "registerHost"]
+        }
+      }
+    },
+    {
+      "name": "Create Class",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"developerKey\": \"{{developerKey}}\",\n  \"hostId\": \"{{hostId}}\",\n  \"title\": \"Biology Live Session\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/createClass",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "createClass"]
+        }
+      }
+    },
+    {
+      "name": "Purchase Course",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"classId\": \"{{classId}}\",\n  \"studentId\": \"student-001\",\n  \"displayName\": \"Alicia Student\",\n  \"developerKey\": \"{{developerKey}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/purchaseCourse",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "purchaseCourse"]
+        }
+      }
+    },
+    {
+      "name": "Start Class",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"hostId\": \"{{hostId}}\",\n  \"classId\": \"{{classId}}\",\n  \"developerKey\": \"{{developerKey}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/startClass",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "startClass"]
+        }
+      }
+    },
+    {
+      "name": "Class Participants",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/class/{{classId}}/participants",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "class", "{{classId}}", "participants"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "developerKey", "value": "" },
+    { "key": "hostId", "value": "" },
+    { "key": "classId", "value": "" }
+  ]
+}

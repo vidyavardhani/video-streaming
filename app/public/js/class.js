@@ -145,6 +145,7 @@
   const participantQuality = new Map();
   const peerStatsIntervals = new Map();
   const peerStatsSamples = new Map();
+  const remoteStreamCache = new Map();
 
   const remoteLossKey = (token, label) => `${token}:${label}`;
 
@@ -3130,6 +3131,30 @@
     });
   };
 
+  const notifyAutoJoinUpdate = () => {
+    const roster = Array.isArray(state.classInfo?.autoJoinRoster)
+      ? state.classInfo.autoJoinRoster
+      : [];
+    const participants = Array.isArray(state.classInfo?.participants)
+      ? state.classInfo.participants
+      : [];
+    const entries = roster.map((entry) => {
+      const match = participants.find((participant) => participant.autoJoinId === entry.studentId);
+      const name = entry.displayName || match?.displayName || `Student ${entry.studentId}`;
+      return {
+        studentId: entry.studentId,
+        displayName: name,
+        joined: Boolean(match)
+      };
+    });
+    const detail = {
+      entries,
+      total: entries.length
+    };
+    window.__autoJoinState = detail;
+    window.dispatchEvent(new CustomEvent('auto-join:update', { detail }));
+  };
+
   const renderParticipants = () => {
     if (!elements.participantsList || !state.classInfo) return;
     const participants = state.classInfo.participants || [];
@@ -3165,11 +3190,20 @@
     participants.forEach((participant) => {
       const li = document.createElement('li');
       li.className = 'participant';
+      if (participant.autoJoinId) {
+        li.classList.add('auto-joined');
+      }
       const identity = document.createElement('div');
       identity.className = 'identity';
       const strong = document.createElement('strong');
       strong.textContent = participant.displayName;
       identity.appendChild(strong);
+      if (participant.autoJoinId) {
+        const tag = document.createElement('span');
+        tag.className = 'participant-tag auto';
+        tag.textContent = 'Auto-joined';
+        identity.appendChild(tag);
+      }
       li.appendChild(identity);
 
       const mediaState = participant.mediaState || getMediaState(participant.token);
@@ -3277,6 +3311,7 @@
       el.remove();
       state.videos.delete(id);
     }
+    remoteStreamCache.delete(id);
   };
 
   const setVideoSource = (video, stream, muted = false) => {
@@ -3608,6 +3643,7 @@
     renderQna();
     updateRecordingStatus();
     refreshStage();
+    notifyAutoJoinUpdate();
   };
 
   const loadUser = async () => {
@@ -3905,8 +3941,44 @@
       }
     });
 
-    state.socket.on('class:started', () => {
+    state.socket.on('class:started', ({ autoJoinees } = {}) => {
       state.classInfo.status = 'live';
+      if (!Array.isArray(state.classInfo.autoJoinRoster)) {
+        state.classInfo.autoJoinRoster = [];
+      }
+      if (!Array.isArray(state.classInfo.participants)) {
+        state.classInfo.participants = [];
+      }
+      if (!Array.isArray(state.classInfo.autoJoineeIds)) {
+        state.classInfo.autoJoineeIds = [];
+      }
+      if (Array.isArray(autoJoinees)) {
+        autoJoinees.forEach((entry) => {
+          if (!entry?.token) {
+            return;
+          }
+          const existingParticipant = state.classInfo.participants.find((p) => p.token === entry.token);
+          if (!existingParticipant) {
+            state.classInfo.participants.push({
+              displayName: entry.displayName || 'Participant',
+              token: entry.token,
+              autoJoinId: entry.autoJoinId,
+              mediaState: { audio: false, video: false }
+            });
+          }
+          if (entry.autoJoinId && !state.classInfo.autoJoinRoster.some((item) => item.studentId === entry.autoJoinId)) {
+            state.classInfo.autoJoinRoster.push({
+              studentId: entry.autoJoinId,
+              displayName: entry.displayName || 'Participant',
+              joinToken: entry.token
+            });
+          }
+          if (entry.autoJoinId && !state.classInfo.autoJoineeIds.includes(entry.autoJoinId)) {
+            state.classInfo.autoJoineeIds.push(entry.autoJoinId);
+          }
+        });
+        notifyAutoJoinUpdate();
+      }
       updateHandRaiseButton();
       if (!state.isHost && state.admitted && elements.waitingMessage) {
         elements.waitingMessage.textContent = 'Joining the class…';
@@ -4185,6 +4257,7 @@
       pc.close();
     });
     state.peers.clear();
+    remoteStreamCache.clear();
     state.videos.forEach((node, key) => {
       if (key !== 'local') node.remove();
     });
@@ -4239,11 +4312,28 @@
     };
 
     pc.ontrack = (event) => {
-      const [stream] = event.streams;
+      let stream = event.streams && event.streams[0];
+      if (!stream) {
+        const cached = remoteStreamCache.get(targetToken) || new MediaStream();
+        if (event.track && !cached.getTracks().some((track) => track.id === event.track.id)) {
+          cached.addTrack(event.track);
+        }
+        remoteStreamCache.set(targetToken, cached);
+        stream = cached;
+      } else {
+        remoteStreamCache.set(targetToken, stream);
+      }
       if (!stream) return;
       attachStream(targetToken, stream, getNameByToken(targetToken));
       if (event.track && typeof event.track.addEventListener === 'function') {
         event.track.addEventListener('ended', () => {
+          const cached = remoteStreamCache.get(targetToken);
+          if (cached) {
+            cached.removeTrack(event.track);
+            if (cached.getTracks().length === 0) {
+              remoteStreamCache.delete(targetToken);
+            }
+          }
           if (targetToken === 'host' && !state.isHost) {
             if (detectScreenTrack(stream)) {
               state.hostMedia.screen = null;
@@ -4263,6 +4353,7 @@
       participantQuality.delete(targetToken);
       stopPeerStatsMonitor(targetToken);
       hostMediaSync?.unregister(targetToken);
+      remoteStreamCache.delete(targetToken);
       if (targetToken === 'host' && !state.isHost) {
         state.hostMedia = { camera: null, screen: null };
         refreshStage();
@@ -4466,6 +4557,8 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ joinToken: token })
     });
+
+    notifyAutoJoinUpdate();
   };
 
   const removeParticipant = async (token) => {

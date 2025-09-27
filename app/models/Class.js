@@ -33,6 +33,10 @@ const participantSchema = new mongoose.Schema({
     type: String,
     default: uuid
   },
+  autoJoinId: {
+    type: String,
+    default: null
+  },
   autoAdmit: {
     type: Boolean,
     default: false
@@ -54,6 +58,22 @@ const participantSchema = new mongoose.Schema({
     default: () => []
   }
 }, { timestamps: true });
+
+const autoJoinRosterSchema = new mongoose.Schema({
+  studentId: {
+    type: String,
+    required: true
+  },
+  displayName: {
+    type: String,
+    required: true
+  },
+  joinToken: {
+    type: String,
+    default: uuid
+  },
+  lastJoinedAt: Date
+}, { _id: false });
 
 const lobbySchema = new mongoose.Schema({
   user: {
@@ -239,7 +259,15 @@ const classSchema = new mongoose.Schema({
     startedAt: Date,
     fileKey: String
   },
-  recordedVideoLink: String
+  recordedVideoLink: String,
+  autoJoineeIds: {
+    type: [String],
+    default: () => []
+  },
+  autoJoinRoster: {
+    type: [autoJoinRosterSchema],
+    default: () => []
+  }
 }, { timestamps: true });
 
 classSchema.pre('save', function generateTokens(next) {
@@ -249,6 +277,10 @@ classSchema.pre('save', function generateTokens(next) {
   });
   this.participants = this.participants.map((entry) => {
     if (!entry.token) entry.token = uuid();
+    return entry;
+  });
+  this.autoJoinRoster = this.autoJoinRoster.map((entry) => {
+    if (!entry.joinToken) entry.joinToken = uuid();
     return entry;
   });
   next();

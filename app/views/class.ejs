@@ -134,6 +134,7 @@
             <ul id="live-lobby-list"></ul>
           </section>
           <ul id="participants-list" class="participants"></ul>
+          <div id="auto-join-panel" class="auto-join-panel" data-class-code="<%= classCode %>"></div>
           <div id="raised-hands" class="raised-hands hidden">
             <h4>Hands raised</h4>
             <ul id="raised-hands-list"></ul>
@@ -474,5 +475,6 @@
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/public/js/class.js" defer></script>
+  <script type="module" src="/public/js/meetingAutoJoin.js" defer></script>
 </body>
 </html>
