@@ -35,7 +35,7 @@
           <input id="display-name" type="text" placeholder="Enter your name" class="text-input">
           <div class="preview-controls">
             <button class="ghost pill-btn" id="toggle-mic">Mute preview</button>
-            <button class="ghost pill-btn" id="toggle-camera">Hide camera</button>
+            <button class="ghost pill-btn" id="toggle-camera" aria-haspopup="true" aria-expanded="false">Hide camera</button>
             <button class="primary" id="join-btn">Join class</button>
           </div>
         </div>
@@ -119,6 +119,9 @@
           <div id="chat-messages" class="chat-messages"></div>
           <form id="chat-form" class="chat-form">
             <input id="chat-text" type="text" placeholder="Send a message" autocomplete="off">
+            <button type="submit" class="chat-send" aria-label="Send message">
+              <span>Send</span>
+            </button>
           </form>
         </div>
         <div id="participants-drawer" class="side-drawer hidden" aria-hidden="true">
@@ -232,7 +235,7 @@
                   </svg>
                 </span>
               </button>
-                 <button id="viewer-camera-toggle" class="control-btn student-only" type="button" aria-label="Toggle camera" aria-pressed="false" disabled data-tooltip="Camera">
+              <button id="viewer-camera-toggle" class="control-btn student-only" type="button" aria-label="Toggle camera" aria-pressed="false" data-tooltip="Camera" aria-haspopup="true" aria-expanded="false">
                 <span class="icon">
                   <svg viewBox="0 0 24 24" role="presentation" focusable="false">
                     <rect x="4" y="6" width="11" height="12" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
@@ -242,7 +245,7 @@
                 </span>
               </button>
 
-              <button id="live-camera-toggle" class="control-btn host-only" type="button" aria-label="Toggle camera" aria-pressed="true" data-tooltip="Camera">
+              <button id="live-camera-toggle" class="control-btn host-only" type="button" aria-label="Toggle camera" aria-pressed="true" data-tooltip="Camera" aria-haspopup="true" aria-expanded="false">
                 <span class="icon">
                   <svg viewBox="0 0 24 24" role="presentation" focusable="false">
                     <rect x="4" y="6" width="11" height="12" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
@@ -460,6 +463,10 @@
         <a href="/" class="secondary">Return to dashboard</a>
       </div>
     </section>
+  </div>
+  <div id="camera-menu" class="camera-menu hidden" role="menu" aria-hidden="true">
+    <button id="camera-menu-toggle" type="button" role="menuitem">Turn camera off</button>
+    <button id="camera-menu-switch" type="button" role="menuitem">Switch camera</button>
   </div>
   <div id="modal-layer" class="modal-layer hidden" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal-card">
