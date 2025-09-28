@@ -90,13 +90,16 @@ const startRecording = async (klass) => {
     await fsp.writeFile(outputPath, Buffer.from('Simulated recording for class'));
   }
 
-  activeRecordings.set(classKey, { outputPath, process: ffmpegProcess });
+  activeRecordings.set(classKey, { outputPath, process: ffmpegProcess, paused: false });
   klass.recording = {
     isRecording: true,
+    isPaused: false,
     startedAt: new Date(),
+    pausedAt: null,
     fileKey: null
   };
   klass.recordedVideoLink = null;
+  klass.recordingClassLink = null;
 };
 
 const stopRecording = async (klass) => {
@@ -117,14 +120,67 @@ const stopRecording = async (klass) => {
 
   klass.recording = {
     isRecording: false,
+    isPaused: false,
     startedAt: klass.recording?.startedAt || null,
+    pausedAt: null,
     fileKey
   };
-  klass.recordedVideoLink = link || `s3://${bucket || 'bucket'}/${fileKey}`;
-  return link || klass.recordedVideoLink;
+  const fallbackLink = `s3://${bucket || 'bucket'}/${fileKey}`;
+  const finalLink = link || fallbackLink;
+  klass.recordedVideoLink = finalLink;
+  klass.recordingClassLink = finalLink;
+  return finalLink;
+};
+
+const pauseRecording = async (klass) => {
+  if (!klass) return;
+  const classKey = klass._id.toString();
+  const recording = activeRecordings.get(classKey);
+  if (!recording || recording.paused) {
+    return;
+  }
+  recording.paused = true;
+  if (recording.process && typeof recording.process.kill === 'function') {
+    try {
+      recording.process.kill('SIGSTOP');
+    } catch (error) {
+      /* ignore pause signalling issues */
+    }
+  }
+  klass.recording = {
+    ...(klass.recording || {}),
+    isRecording: true,
+    isPaused: true,
+    pausedAt: new Date()
+  };
+};
+
+const resumeRecording = async (klass) => {
+  if (!klass) return;
+  const classKey = klass._id.toString();
+  const recording = activeRecordings.get(classKey);
+  if (!recording || !recording.paused) {
+    return;
+  }
+  recording.paused = false;
+  if (recording.process && typeof recording.process.kill === 'function') {
+    try {
+      recording.process.kill('SIGCONT');
+    } catch (error) {
+      /* ignore resume signalling issues */
+    }
+  }
+  klass.recording = {
+    ...(klass.recording || {}),
+    isRecording: true,
+    isPaused: false,
+    pausedAt: null
+  };
 };
 
 module.exports = {
   startRecording,
-  stopRecording
+  stopRecording,
+  pauseRecording,
+  resumeRecording
 };

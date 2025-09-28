@@ -102,6 +102,7 @@ const publicClassShape = (klass) => {
     questions: klass.questions || [],
     recording: klass.recording || { isRecording: false },
     recordedVideoLink: klass.recordedVideoLink || null,
+    recordingClassLink: klass.recordingClassLink || null,
     autoJoineeIds: Array.isArray(klass.autoJoineeIds) ? klass.autoJoineeIds : [],
     autoJoinRoster: (klass.autoJoinRoster || []).map((entry) => ({
       studentId: entry.studentId,
@@ -230,11 +231,15 @@ exports.end = async (req, res) => {
     if (klass.recording) {
       getIO().to(klass.meetingCode).emit('recording:status', {
         recording: klass.recording,
-        recordedVideoLink: klass.recordedVideoLink
+        recordedVideoLink: klass.recordedVideoLink,
+        recordingClassLink: klass.recordingClassLink
       });
     }
 
-    return res.json({ message: 'Class ended' });
+    return res.json({
+      message: 'Class ended',
+      recordingClassLink: klass.recordingClassLink || klass.recordedVideoLink || null
+    });
   } catch (error) {
     console.error('End class error', error);
     return res.status(500).json({ message: 'Unable to end class' });
