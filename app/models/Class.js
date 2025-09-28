@@ -256,10 +256,16 @@ const classSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
+    isPaused: {
+      type: Boolean,
+      default: false
+    },
     startedAt: Date,
+    pausedAt: Date,
     fileKey: String
   },
   recordedVideoLink: String,
+  recordingClassLink: String,
   autoJoineeIds: {
     type: [String],
     default: () => []

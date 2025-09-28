@@ -115,7 +115,7 @@
     activePoll: null,
     pollHistory: [],
     questions: [],
-    recording: { isRecording: false },
+    recording: { isRecording: false, isPaused: false },
     raisedHands: new Map(),
     mediaStates: new Map(),
     handRaised: false,
@@ -143,10 +143,64 @@
     cameraMenuResizeAttached: false,
     controlCenterOpen: false,
     directChats: new Map(),
-    activeDirectChat: null
+    activeDirectChat: null,
+    layout: 'landscape'
   };
 
   state.mediaStates.set('host', { audio: false, video: false });
+
+  const tonePlayer = (() => {
+    let context = null;
+    const ensureContext = async () => {
+      if (typeof window === 'undefined') return null;
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return null;
+      if (!context) {
+        context = new AudioContext();
+      }
+      if (context.state === 'suspended') {
+        try {
+          await context.resume();
+        } catch (error) {
+          /* ignore */
+        }
+      }
+      return context;
+    };
+
+    const play = async (frequency = 880, duration = 0.3) => {
+      try {
+        const ctx = await ensureContext();
+        if (!ctx) return;
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        gain.gain.value = 0;
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.22, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        oscillator.start(now);
+        oscillator.stop(now + duration + 0.05);
+      } catch (error) {
+        /* ignore tone playback issues */
+      }
+    };
+
+    const warmup = () => {
+      ensureContext();
+    };
+
+    return {
+      play,
+      warmup
+    };
+  })();
+
+  window.addEventListener('pointerdown', () => tonePlayer.warmup(), { once: true, passive: true });
 
   const hostTrackRegistry = new WeakSet();
   const remoteTrackGuards = new WeakMap();
@@ -524,6 +578,11 @@
     copyCode: document.getElementById('copy-code'),
     shareInfo: document.getElementById('share-info'),
     emailInvite: document.getElementById('email-invite'),
+    meetingShell: document.querySelector('.meeting-shell'),
+    meetingParticipantCount: document.getElementById('meeting-participant-count'),
+    meetingMicStatus: document.getElementById('meeting-mic-status'),
+    meetingParticipantStat: document.getElementById('meeting-participant-stat'),
+    meetingMicStat: document.getElementById('meeting-mic-stat'),
     chatForm: document.getElementById('chat-form'),
     chatInput: document.getElementById('chat-text'),
     chatMessages: document.getElementById('chat-messages'),
@@ -544,6 +603,8 @@
     participantsToggle: document.getElementById('toggle-participants'),
     participantsBadge: document.getElementById('participants-count-badge'),
     lobbyBadge: document.getElementById('participants-lobby-badge'),
+    layoutLandscape: document.getElementById('layout-landscape'),
+    layoutPortrait: document.getElementById('layout-portrait'),
     chatClose: document.getElementById('chat-close'),
     participantsClose: document.getElementById('participants-close'),
     chatDrawer: document.getElementById('chat-drawer'),
@@ -572,6 +633,7 @@
     recordingStatus: document.getElementById('recording-status'),
     recordingStart: document.getElementById('recording-start'),
     recordingStop: document.getElementById('recording-stop'),
+    recordingPause: document.getElementById('recording-pause'),
     recordingLink: document.getElementById('recording-link'),
     handRaiseBtn: document.getElementById('hand-raise-btn'),
     raisedHands: document.getElementById('raised-hands'),
@@ -2588,7 +2650,18 @@
   let hostMediaSync;
 
   const playTone = (preset) => {
-    toneManager?.play(preset);
+    const wasHandled = toneManager?.play(preset);
+    if (toneManager && toneManager.enabled !== false && wasHandled !== false) {
+      return;
+    }
+    if (!tonePlayer) return;
+    if (preset === 'join') {
+      tonePlayer.play(880, 0.28);
+    } else if (preset === 'leave') {
+      tonePlayer.play(520, 0.32);
+    } else if (preset === 'hand') {
+      tonePlayer.play(940, 0.24);
+    }
   };
 
   const FOCUSABLE_SELECTOR = [
@@ -2791,16 +2864,29 @@
   const updateRecordingStatus = () => {
     if (!elements.recordingStatus) return;
     const isRecording = !!state.recording?.isRecording;
-    elements.recordingStatus.textContent = isRecording ? 'Recording in progress…' : 'Recording inactive';
-    elements.recordingStatus.classList.toggle('active', isRecording);
+    const isPaused = !!state.recording?.isPaused;
+    let statusText = 'Recording inactive';
+    if (isRecording) {
+      statusText = isPaused ? 'Recording paused' : 'Recording in progress…';
+    }
+    elements.recordingStatus.textContent = statusText;
+    elements.recordingStatus.classList.toggle('active', isRecording && !isPaused);
+    elements.recordingStatus.classList.toggle('paused', isPaused);
     if (elements.recordingStart) {
       elements.recordingStart.classList.toggle('hidden', !state.isHost || isRecording);
     }
     if (elements.recordingStop) {
       elements.recordingStop.classList.toggle('hidden', !state.isHost || !isRecording);
     }
+    if (elements.recordingPause) {
+      elements.recordingPause.classList.toggle('hidden', !state.isHost || !isRecording);
+      elements.recordingPause.textContent = isPaused ? 'Resume recording' : 'Pause recording';
+      elements.recordingPause.classList.toggle('is-active', isPaused);
+      elements.recordingPause.setAttribute('aria-pressed', isPaused.toString());
+      elements.recordingPause.setAttribute('aria-label', isPaused ? 'Resume recording' : 'Pause recording');
+    }
     if (elements.recordingLink) {
-      const link = state.classInfo?.recordedVideoLink;
+      const link = state.classInfo?.recordingClassLink || state.classInfo?.recordedVideoLink;
       if (link) {
         elements.recordingLink.classList.remove('hidden');
         elements.recordingLink.innerHTML = `<a href="${link}" target="_blank" rel="noopener">Download recording</a>`;
@@ -3268,6 +3354,49 @@
     window.dispatchEvent(new CustomEvent('auto-join:update', { detail }));
   };
 
+  const getTotalParticipantsCount = () => {
+    const participants = Array.isArray(state.classInfo?.participants)
+      ? state.classInfo.participants.length
+      : 0;
+    const hostCount = state.classInfo?.host ? 1 : 0;
+    return participants + hostCount;
+  };
+
+  const updateMeetingStats = () => {
+    const total = getTotalParticipantsCount();
+    if (elements.meetingParticipantCount) {
+      elements.meetingParticipantCount.textContent = total.toString();
+    }
+    if (elements.meetingParticipantStat) {
+      elements.meetingParticipantStat.classList.toggle('active', total > 0);
+    }
+    const audioEnabled = !!state.localStream?.getTracks()?.some((track) => track.kind === 'audio' && track.enabled);
+    if (elements.meetingMicStatus) {
+      elements.meetingMicStatus.textContent = audioEnabled ? 'Mic on' : 'Mic off';
+    }
+    if (elements.meetingMicStat) {
+      elements.meetingMicStat.classList.toggle('active', audioEnabled);
+    }
+  };
+
+  const setLayout = (layout) => {
+    const next = layout === 'portrait' ? 'portrait' : 'landscape';
+    state.layout = next;
+    if (elements.meetingShell) {
+      elements.meetingShell.classList.remove('layout-landscape', 'layout-portrait');
+      elements.meetingShell.classList.add(`layout-${next}`);
+    }
+    const isPortrait = next === 'portrait';
+    if (elements.layoutLandscape) {
+      elements.layoutLandscape.setAttribute('aria-pressed', (!isPortrait).toString());
+      elements.layoutLandscape.classList.toggle('is-active', !isPortrait);
+    }
+    if (elements.layoutPortrait) {
+      elements.layoutPortrait.setAttribute('aria-pressed', isPortrait.toString());
+      elements.layoutPortrait.classList.toggle('is-active', isPortrait);
+    }
+  };
+
   const renderParticipants = () => {
     if (!elements.participantsList || !state.classInfo) return;
     const participants = state.classInfo.participants || [];
@@ -3287,6 +3416,8 @@
       span.textContent = icon;
       return span;
     };
+
+    updateMeetingStats();
 
     if (state.classInfo.host) {
       const hostItem = document.createElement('li');
@@ -3551,6 +3682,7 @@
       menu.classList.add('hidden');
       menu.classList.remove('open');
       menu.setAttribute('aria-hidden', 'true');
+      menu.removeAttribute('data-position');
     }
     if (state.cameraMenuDismiss) {
       document.removeEventListener('click', state.cameraMenuDismiss);
@@ -3584,10 +3716,20 @@
     const scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
     const menu = elements.cameraMenu;
     menu.style.left = `${rect.left + rect.width / 2 + scrollX}px`;
-    menu.style.top = `${rect.bottom + 8 + scrollY}px`;
     menu.classList.remove('hidden');
-    requestAnimationFrame(() => menu.classList.add('open'));
     menu.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => {
+      const bounds = menu.getBoundingClientRect();
+      let top = rect.top + scrollY - bounds.height - 12;
+      let position = 'top';
+      if (top < scrollY + 12) {
+        top = rect.bottom + 12 + scrollY;
+        position = 'bottom';
+      }
+      menu.style.top = `${top}px`;
+      menu.dataset.position = position;
+      menu.classList.add('open');
+    });
     button.classList.add('menu-open');
     button.setAttribute('aria-expanded', 'true');
     const focusTarget = menu.querySelector('button:not(:disabled)');
@@ -3950,7 +4092,7 @@
     state.activePoll = state.classInfo.activePoll || null;
     state.pollHistory = state.classInfo.pollHistory || [];
     state.questions = state.classInfo.questions || [];
-    state.recording = state.classInfo.recording || { isRecording: false };
+    state.recording = state.classInfo.recording || { isRecording: false, isPaused: false };
     applyMediaState('host', state.classInfo.hostMediaState || { audio: false, video: false });
     (state.classInfo.participants || []).forEach((participant) => {
       applyMediaState(participant.token, participant.mediaState);
@@ -4554,10 +4696,13 @@
 
     state.socket.on('recording:status', (payload) => {
       const recording = payload?.recording || payload;
-      state.recording = recording;
-      state.classInfo.recording = recording;
+      state.recording = { ...recording, isPaused: !!recording?.isPaused };
+      state.classInfo.recording = state.recording;
       if (payload?.recordedVideoLink) {
         state.classInfo.recordedVideoLink = payload.recordedVideoLink;
+      }
+      if (payload?.recordingClassLink) {
+        state.classInfo.recordingClassLink = payload.recordingClassLink;
       }
       updateRecordingStatus();
     });
@@ -5291,9 +5436,27 @@
       return;
     }
     const data = await res.json();
-    state.recording = data;
-    state.classInfo.recording = data;
+    state.recording = { ...data, isPaused: !!data?.isPaused };
+    state.classInfo.recording = state.recording;
     state.classInfo.recordedVideoLink = null;
+    state.classInfo.recordingClassLink = null;
+    updateRecordingStatus();
+  });
+
+  elements.recordingPause?.addEventListener('click', async () => {
+    if (!state.isHost || !state.recording?.isRecording) return;
+    const action = state.recording.isPaused ? 'resume' : 'pause';
+    const res = await fetch(`/classes/${classCode}/recording/${action}`, { method: 'POST' });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      alert(error.message || `Unable to ${action} recording`);
+      return;
+    }
+    const data = await res.json();
+    if (data?.recording) {
+      state.recording = { ...data.recording, isPaused: !!data.recording.isPaused };
+      state.classInfo.recording = state.recording;
+    }
     updateRecordingStatus();
   });
 
@@ -5306,10 +5469,13 @@
       return;
     }
     const data = await res.json();
-    state.recording = data.recording;
-    state.classInfo.recording = data.recording;
+    state.recording = { ...data.recording, isPaused: !!data.recording?.isPaused };
+    state.classInfo.recording = state.recording;
     if (data.recordedVideoLink) {
       state.classInfo.recordedVideoLink = data.recordedVideoLink;
+    }
+    if (data.recordingClassLink) {
+      state.classInfo.recordingClassLink = data.recordingClassLink;
     }
     updateRecordingStatus();
   });
@@ -5385,6 +5551,7 @@
   const setToggleState = (button, activeLabel, inactiveLabel, isActive) => {
     if (!button) return;
     button.classList.toggle('is-off', !isActive);
+    button.classList.toggle('is-active', !!isActive);
     const labelNode = button.querySelector('.label, .text');
     if (labelNode) {
       labelNode.textContent = isActive ? activeLabel : inactiveLabel;
@@ -5732,6 +5899,7 @@
     setToggleState(elements.cameraBtn, 'Camera on', 'Camera off', videoEnabled);
     setToggleState(elements.liveCameraToggle, 'Camera on', 'Camera off', videoEnabled);
     updateViewerMediaControls();
+    updateMeetingStats();
   };
 
   const emitMediaUpdate = () => {
@@ -6137,6 +6305,8 @@
   elements.participantsToggle?.addEventListener('click', () => toggleDrawer('participants'));
   elements.chatClose?.addEventListener('click', () => closeDrawer());
   elements.participantsClose?.addEventListener('click', () => closeDrawer());
+  elements.layoutLandscape?.addEventListener('click', () => setLayout('landscape'));
+  elements.layoutPortrait?.addEventListener('click', () => setLayout('portrait'));
   elements.drawerBackdrop?.addEventListener('click', () => closeDrawer());
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -6162,6 +6332,7 @@
   const init = async () => {
     hideRejoinPrompt();
     initializeComponents();
+    setLayout(state.layout);
     await loadClass();
     await loadUser();
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
