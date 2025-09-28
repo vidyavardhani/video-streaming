@@ -1908,8 +1908,69 @@
       if (!audio && !video) {
         return this.state?.localStream || null;
       }
+
+      const isMobileDevice = () =>
+        typeof navigator !== 'undefined' &&
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent || ''
+        );
+
+      const buildAudioConstraints = (value) => {
+        if (!value) return false;
+        const base = typeof value === 'object' ? { ...value } : {};
+        return {
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true },
+          ...base
+        };
+      };
+
+      const buildVideoConstraints = (value) => {
+        if (!value) return false;
+        const base = typeof value === 'object' ? { ...value } : {};
+        const wantsBackCamera = isMobileDevice() && !base.facingMode;
+        return {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: wantsBackCamera ? { ideal: 'environment' } : { ideal: 'user' },
+          ...base
+        };
+      };
+
+      const audioConstraints = buildAudioConstraints(audio);
+      const videoConstraints = buildVideoConstraints(video);
+
+      const constraints = {
+        audio: audioConstraints,
+        video: videoConstraints
+      };
+
+      const attemptFallback = async (error) => {
+        if (!videoConstraints || !isMobileDevice()) {
+          throw error;
+        }
+        const requestedEnvironment =
+          videoConstraints?.facingMode &&
+          ((typeof videoConstraints.facingMode === 'string' &&
+            videoConstraints.facingMode === 'environment') ||
+            (typeof videoConstraints.facingMode === 'object' &&
+              videoConstraints.facingMode.ideal === 'environment'));
+        if (!requestedEnvironment) {
+          throw error;
+        }
+        const fallbackConstraints = {
+          ...constraints,
+          video: {
+            ...videoConstraints,
+            facingMode: { ideal: 'user' }
+          }
+        };
+        return navigator.mediaDevices.getUserMedia(fallbackConstraints);
+      };
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio, video });
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         if (audio) this.granted.audio = true;
         if (video) this.granted.video = true;
         this.previewInitialized = true;
@@ -1918,8 +1979,19 @@
         }
         return stream;
       } catch (error) {
-        console.warn('Permission error', error);
-        return null;
+        try {
+          const fallbackStream = await attemptFallback(error);
+          if (audio) this.granted.audio = true;
+          if (video) this.granted.video = true;
+          this.previewInitialized = true;
+          if (typeof this.onStreamReady === 'function') {
+            this.onStreamReady(fallbackStream, { replace });
+          }
+          return fallbackStream;
+        } catch (finalError) {
+          console.warn('Permission error', finalError);
+          return null;
+        }
       }
     }
   }

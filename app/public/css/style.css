@@ -1976,6 +1976,21 @@ utility-panel {
 
 
 @media (max-width: 720px) {
+  #live-view {
+    height: auto;
+    max-height: none;
+    overflow-y: auto;
+  }
+  .meeting-shell {
+    min-height: 100dvh;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 7.5rem);
+  }
+  .stage {
+    min-height: 60vh;
+  }
+  .side-drawer {
+    height: 100dvh;
+  }
   .meeting-header {
     top: 1.2rem;
     width: calc(100% - 2.4rem);
@@ -1987,6 +2002,10 @@ utility-panel {
   .control-btn {
     width: 50px;
     height: 50px;
+  }
+  .meeting-controls {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem);
+    margin-bottom: 0;
   }
   .control-more-menu {
     width: calc(100% - 3rem);
