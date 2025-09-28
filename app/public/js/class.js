@@ -80,6 +80,12 @@
     storageSet(storage.local, displayNameKey, name);
   };
 
+  const isMobileDevice = () =>
+    typeof navigator !== 'undefined' &&
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent || ''
+    );
+
   const state = {
     socket: null,
     classInfo: null,
@@ -129,6 +135,12 @@
     toastActionHandler: null,
     moreMenuFocusCleanup: null,
     modalFocusCleanup: null,
+    preferredCamera: { deviceId: null, facingMode: null },
+    availableCameras: [],
+    cameraMenuContext: null,
+    cameraMenuDismiss: null,
+    cameraMenuKeyHandler: null,
+    cameraMenuResizeAttached: false,
     controlCenterOpen: false,
     directChats: new Map(),
     activeDirectChat: null
@@ -584,6 +596,9 @@
     controlCenterAlert: document.getElementById('control-center-alert'),
     viewerMicToggle: document.getElementById('viewer-mic-toggle'),
     viewerCameraToggle: document.getElementById('viewer-camera-toggle'),
+    cameraMenu: document.getElementById('camera-menu'),
+    cameraMenuToggle: document.getElementById('camera-menu-toggle'),
+    cameraMenuSwitch: document.getElementById('camera-menu-switch'),
     controlPolls: document.getElementById('control-polls'),
     controlRecording: document.getElementById('control-recording'),
     controlWhiteboard: document.getElementById('control-whiteboard'),
@@ -1908,8 +1923,95 @@
       if (!audio && !video) {
         return this.state?.localStream || null;
       }
+
+      const buildAudioConstraints = (value) => {
+        if (!value) return false;
+        const base = typeof value === 'object' ? { ...value } : {};
+        return {
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true },
+          ...base
+        };
+      };
+
+      const buildVideoConstraints = (value) => {
+        if (!value) return false;
+        const base = typeof value === 'object' ? { ...value } : {};
+        const result = {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          ...base
+        };
+        const preferred = this.state?.preferredCamera || {};
+        if (!result.deviceId && preferred.deviceId) {
+          result.deviceId = { exact: preferred.deviceId };
+        }
+        if (!result.facingMode) {
+          if (preferred.facingMode) {
+            result.facingMode = { ideal: preferred.facingMode };
+          } else {
+            result.facingMode = isMobileDevice()
+              ? { ideal: 'environment' }
+              : { ideal: 'user' };
+          }
+        }
+        return result;
+      };
+
+      const audioConstraints = buildAudioConstraints(audio);
+      const videoConstraints = buildVideoConstraints(video);
+
+      const constraints = {
+        audio: audioConstraints,
+        video: videoConstraints
+      };
+
+      const attemptFallback = async (error) => {
+        if (!videoConstraints) {
+          throw error;
+        }
+        if (videoConstraints.deviceId) {
+          const fallbackVideo = { ...videoConstraints };
+          delete fallbackVideo.deviceId;
+          if (!fallbackVideo.facingMode) {
+            fallbackVideo.facingMode = { ideal: 'user' };
+          }
+          if (this.state?.preferredCamera) {
+            this.state.preferredCamera = {
+              deviceId: null,
+              facingMode: this.state.preferredCamera.facingMode || null
+            };
+          }
+          return navigator.mediaDevices.getUserMedia({
+            ...constraints,
+            video: fallbackVideo
+          });
+        }
+        if (!isMobileDevice()) {
+          throw error;
+        }
+        const requestedEnvironment =
+          videoConstraints?.facingMode &&
+          ((typeof videoConstraints.facingMode === 'string' &&
+            videoConstraints.facingMode === 'environment') ||
+            (typeof videoConstraints.facingMode === 'object' &&
+              videoConstraints.facingMode.ideal === 'environment'));
+        if (!requestedEnvironment) {
+          throw error;
+        }
+        const fallbackConstraints = {
+          ...constraints,
+          video: {
+            ...videoConstraints,
+            facingMode: { ideal: 'user' }
+          }
+        };
+        return navigator.mediaDevices.getUserMedia(fallbackConstraints);
+      };
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio, video });
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         if (audio) this.granted.audio = true;
         if (video) this.granted.video = true;
         this.previewInitialized = true;
@@ -1918,8 +2020,19 @@
         }
         return stream;
       } catch (error) {
-        console.warn('Permission error', error);
-        return null;
+        try {
+          const fallbackStream = await attemptFallback(error);
+          if (audio) this.granted.audio = true;
+          if (video) this.granted.video = true;
+          this.previewInitialized = true;
+          if (typeof this.onStreamReady === 'function') {
+            this.onStreamReady(fallbackStream, { replace });
+          }
+          return fallbackStream;
+        } catch (finalError) {
+          console.warn('Permission error', finalError);
+          return null;
+        }
       }
     }
   }
@@ -3338,6 +3451,218 @@
     }
   };
 
+  const rememberCameraPreference = (stream) => {
+    if (!stream) return;
+    const [track] = stream.getVideoTracks ? stream.getVideoTracks() : [];
+    if (!track || typeof track.getSettings !== 'function') return;
+    const settings = track.getSettings();
+    const { deviceId = null, facingMode = null } = settings || {};
+    const previousFacing = state.preferredCamera?.facingMode || null;
+    state.preferredCamera = {
+      deviceId: deviceId || null,
+      facingMode: facingMode || previousFacing
+    };
+  };
+
+  const refreshAvailableCameras = async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      state.availableCameras = [];
+      return [];
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      state.availableCameras = devices.filter((device) => device.kind === 'videoinput');
+      return state.availableCameras;
+    } catch (error) {
+      console.warn('enumerateDevices failed', error);
+      state.availableCameras = [];
+      return [];
+    }
+  };
+
+  const getAvailableCameras = async (force = false) => {
+    if (!force && Array.isArray(state.availableCameras) && state.availableCameras.length) {
+      return state.availableCameras;
+    }
+    return refreshAvailableCameras();
+  };
+
+  const describeCameraPreference = (preference) => {
+    if (!preference) return 'Switch camera';
+    if (preference.facingMode === 'environment') {
+      return 'Switch to back camera';
+    }
+    if (preference.facingMode === 'user') {
+      return 'Switch to front camera';
+    }
+    return 'Switch camera';
+  };
+
+  const determineNextCameraPreference = async (devices) => {
+    const cameraDevices = devices || (await getAvailableCameras());
+    const currentTrack = state.localStream?.getVideoTracks()?.[0];
+    const settings = currentTrack && typeof currentTrack.getSettings === 'function' ? currentTrack.getSettings() : {};
+    const currentDeviceId = settings?.deviceId || state.preferredCamera?.deviceId || null;
+    if (cameraDevices.length > 1) {
+      const currentIndex = cameraDevices.findIndex((device) => device.deviceId === currentDeviceId);
+      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % cameraDevices.length : 0;
+      const target = cameraDevices[nextIndex];
+      return target ? { deviceId: target.deviceId, facingMode: null } : null;
+    }
+    const currentFacing =
+      settings?.facingMode ||
+      state.preferredCamera?.facingMode ||
+      (isMobileDevice() ? 'environment' : null);
+    if (!currentFacing && !isMobileDevice()) {
+      return null;
+    }
+    const nextFacing = currentFacing === 'environment' ? 'user' : 'environment';
+    return { deviceId: null, facingMode: nextFacing };
+  };
+
+  const handleCameraMenuResize = () => closeCameraMenu();
+
+  const syncCameraMenuOptions = async (options = {}) => {
+    if (!elements.cameraMenu) return;
+    const toggleBtn = elements.cameraMenuToggle;
+    if (toggleBtn) {
+      const videoEnabled = isTrackEnabled('video');
+      toggleBtn.textContent = videoEnabled ? 'Turn camera off' : 'Turn camera on';
+      const canToggle = cameraControl?.canInteract ? cameraControl.canInteract(options) : true;
+      toggleBtn.disabled = !canToggle;
+      toggleBtn.setAttribute('aria-disabled', (!canToggle).toString());
+    }
+    const switchBtn = elements.cameraMenuSwitch;
+    if (switchBtn) {
+      const devices = await getAvailableCameras(true);
+      const preference = await determineNextCameraPreference(devices);
+      const canSwitch = !!preference;
+      switchBtn.textContent = describeCameraPreference(preference);
+      switchBtn.disabled = !canSwitch;
+      switchBtn.setAttribute('aria-disabled', (!canSwitch).toString());
+    }
+  };
+
+  const closeCameraMenu = (returnFocus = false) => {
+    const context = state.cameraMenuContext;
+    if (!context) return;
+    const menu = elements.cameraMenu;
+    if (menu) {
+      menu.classList.add('hidden');
+      menu.classList.remove('open');
+      menu.setAttribute('aria-hidden', 'true');
+    }
+    if (state.cameraMenuDismiss) {
+      document.removeEventListener('click', state.cameraMenuDismiss);
+      state.cameraMenuDismiss = null;
+    }
+    if (state.cameraMenuKeyHandler) {
+      document.removeEventListener('keydown', state.cameraMenuKeyHandler);
+      state.cameraMenuKeyHandler = null;
+    }
+    if (state.cameraMenuResizeAttached) {
+      window.removeEventListener('resize', handleCameraMenuResize);
+      state.cameraMenuResizeAttached = false;
+    }
+    const { button } = context;
+    if (button) {
+      button.classList.remove('menu-open');
+      button.setAttribute('aria-expanded', 'false');
+      if (returnFocus) {
+        button.focus({ preventScroll: true });
+      }
+    }
+    state.cameraMenuContext = null;
+  };
+
+  const openCameraMenu = async (button, options = {}) => {
+    if (!button || !elements.cameraMenu) return;
+    state.cameraMenuContext = { button, options };
+    await syncCameraMenuOptions(options);
+    const rect = button.getBoundingClientRect();
+    const scrollX = window.scrollX || window.pageXOffset || document.documentElement.scrollLeft || 0;
+    const scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+    const menu = elements.cameraMenu;
+    menu.style.left = `${rect.left + rect.width / 2 + scrollX}px`;
+    menu.style.top = `${rect.bottom + 8 + scrollY}px`;
+    menu.classList.remove('hidden');
+    requestAnimationFrame(() => menu.classList.add('open'));
+    menu.setAttribute('aria-hidden', 'false');
+    button.classList.add('menu-open');
+    button.setAttribute('aria-expanded', 'true');
+    const focusTarget = menu.querySelector('button:not(:disabled)');
+    if (focusTarget) {
+      focusTarget.focus({ preventScroll: true });
+    }
+    state.cameraMenuDismiss = (event) => {
+      const target = event.target;
+      if (!menu.contains(target) && !button.contains(target)) {
+        closeCameraMenu();
+      }
+    };
+    state.cameraMenuKeyHandler = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeCameraMenu(true);
+      }
+    };
+    document.addEventListener('click', state.cameraMenuDismiss);
+    document.addEventListener('keydown', state.cameraMenuKeyHandler);
+    if (!state.cameraMenuResizeAttached) {
+      window.addEventListener('resize', handleCameraMenuResize);
+      state.cameraMenuResizeAttached = true;
+    }
+  };
+
+  const installCameraMenu = (button, options = {}) => {
+    if (!button) return;
+    if (button.dataset.cameraMenuBound === '1') return;
+    button.dataset.cameraMenuBound = '1';
+    button.setAttribute('aria-haspopup', 'true');
+    button.setAttribute('aria-expanded', 'false');
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (state.cameraMenuContext?.button === button) {
+        closeCameraMenu();
+        return;
+      }
+      await openCameraMenu(button, options);
+    });
+  };
+
+  const switchCameraSource = async () => {
+    if (!permissionManager) {
+      showLiveToast('Camera controls unavailable');
+      return false;
+    }
+    const devices = await getAvailableCameras(true);
+    const nextPreference = await determineNextCameraPreference(devices);
+    if (!nextPreference) {
+      showLiveToast('No other camera detected', { duration: 2200 });
+      return false;
+    }
+    state.preferredCamera = nextPreference;
+    const hadAudioTracks = !!state.localStream?.getAudioTracks()?.length;
+    const audioEnabled = isTrackEnabled('audio');
+    const videoEnabled = isTrackEnabled('video');
+    const stream = await permissionManager.acquireStream({ audio: hadAudioTracks, video: true, replace: true });
+    if (!stream) {
+      showLiveToast('Unable to switch camera', { duration: 2200 });
+      return false;
+    }
+    setMediaTrackState('audio', audioEnabled, {
+      skipEmit: true,
+      skipButtons: true,
+      suppressBanner: true
+    });
+    setMediaTrackState('video', videoEnabled, { skipEmit: true, skipButtons: true });
+    syncTrackButtons();
+    emitMediaUpdate();
+    showLiveToast('Switched camera', { duration: 1600 });
+    return true;
+  };
+
   const applyLocalStream = (stream, { replace = false } = {}) => {
     if (!stream) return;
     if (replace && state.localStream && state.localStream !== stream) {
@@ -3350,6 +3675,8 @@
       });
     }
     state.localStream = stream;
+    rememberCameraPreference(stream);
+    refreshAvailableCameras().catch(() => {});
     state.previewReady = true;
     if (!state.isHost) {
       stream.getAudioTracks().forEach((track) => {
@@ -5015,6 +5342,7 @@
     if (state.moreMenuOpen) {
       closeMoreMenu();
     }
+    closeCameraMenu();
   });
 
   elements.chatForm?.addEventListener('submit', async (event) => {
@@ -5031,6 +5359,27 @@
       elements.chatInput.value = '';
       chatManager?.reset();
     }
+  });
+
+  elements.cameraMenu?.addEventListener('click', (event) => {
+    event.stopPropagation();
+  });
+
+  elements.cameraMenuToggle?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const options = state.cameraMenuContext?.options || {};
+    if (cameraControl) {
+      await cameraControl.toggle(options);
+    }
+    closeCameraMenu(true);
+  });
+
+  elements.cameraMenuSwitch?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await switchCameraSource();
+    closeCameraMenu(true);
   });
 
   const setToggleState = (button, activeLabel, inactiveLabel, isActive) => {
@@ -5357,7 +5706,9 @@
     }
 
     if (elements.viewerCameraToggle) {
-      elements.viewerCameraToggle.disabled = !videoAllowed;
+      elements.viewerCameraToggle.disabled = false;
+      elements.viewerCameraToggle.classList.toggle('is-disabled', !videoAllowed);
+      elements.viewerCameraToggle.setAttribute('aria-disabled', (!videoAllowed).toString());
       setToggleState(elements.viewerCameraToggle, 'Camera on', 'Camera off', videoEnabled);
       elements.viewerCameraToggle.setAttribute(
         'aria-label',
@@ -5765,13 +6116,13 @@
   const bindTrackToggles = () => {
     micControl?.bind(elements.muteBtn);
     micControl?.bind(elements.liveMicToggle);
-    cameraControl?.bind(elements.cameraBtn);
-    cameraControl?.bind(elements.liveCameraToggle);
+    installCameraMenu(elements.cameraBtn);
+    installCameraMenu(elements.liveCameraToggle);
   };
 
   const bindViewerControls = () => {
     micControl?.bind(elements.viewerMicToggle, { viewer: true });
-    cameraControl?.bind(elements.viewerCameraToggle, { viewer: true });
+    installCameraMenu(elements.viewerCameraToggle, { viewer: true });
   };
 
   elements.stageZoomIn?.addEventListener('click', () => {

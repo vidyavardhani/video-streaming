@@ -14,6 +14,7 @@
   --danger: #f87171;
   --success: #34d399;
   --stage-zoom: 1;
+  --control-offset: 8.5rem;
   font-family: 'Urbanist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
@@ -303,6 +304,15 @@ button.danger.ghost {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+.control-btn.is-disabled {
+  opacity: 0.45;
+}
+
+.control-btn.is-disabled:hover {
+  transform: none;
+  box-shadow: 0 24px 44px rgba(5, 6, 15, 0.45);
 }
 
 .control-btn.is-off {
@@ -631,12 +641,13 @@ body.is-student #join-btn {
 .meeting-shell {
   position: relative;
   width: 100%;
-  height: 100%;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  align-items: center;
+  align-items: stretch;
   padding: 0;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--control-offset));
   border-radius: 0;
   box-shadow: none;
   border: none;
@@ -646,33 +657,32 @@ body.is-student #join-btn {
 #live-view {
   position: relative;
   width: 100%;
-  height: 100dvh;
-  min-height: 100vh;
-  max-width: 100%;
-  max-height: 100dvh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   overflow: hidden;
   padding: 0;
   margin: 0;
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
 }
 
 .meeting-header {
-    position: absolute;
-    top: 0;
-    left: 0;
-    transform: none;   /* remove centering */
-    display: flex;
-    align-items: flex-start; /* was "left", valid is flex-start */
-    gap: 1.25rem;
-    padding: 0.75rem 1.6rem;
-    background: rgba(12, 14, 25, 0.55);
-    border-radius: 12px;
-    box-shadow: 0 24px 52px rgba(5, 6, 12, 0.45);
-    backdrop-filter: blur(24px);
-    border: 0px solid rgba(148, 163, 184, 0.22);
-    z-index: 40;
+  position: absolute;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.85rem 1.75rem;
+  background: rgba(12, 14, 25, 0.55);
+  border-radius: 16px;
+  box-shadow: 0 24px 52px rgba(5, 6, 12, 0.45);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  z-index: 40;
+  width: min(960px, calc(100% - 3rem));
 }
 
 .meeting-heading {
@@ -771,7 +781,7 @@ body.is-student #join-btn {
   position: relative;
   flex: 1 1 auto;
   width: 100%;
-  height: 100%;
+  min-height: 0;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1273,31 +1283,32 @@ body.is-student .participant-strip {
 }
 
 .meeting-controls {
-  position: absolute;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 4vh);
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
   left: 50%;
   transform: translateX(-50%);
-  width: 100%;
+  width: min(720px, calc(100% - 2.5rem));
   display: flex;
   justify-content: center;
   align-items: center;
   pointer-events: none;
-  z-index: 50;
-  margin-bottom: 20px;
+  z-index: 80;
 }
 
 .meeting-controls .control-bar {
   pointer-events: auto;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 0.9rem;
-  padding: 0.65rem 2.5rem;
+  width: 100%;
+  padding: 0.75rem 1.85rem;
   border-radius: 28px;
-  background: rgba(0, 0, 0, 0.266);
-  border: 0px solid rgba(148, 163, 184, 0.2);
+  background: rgba(12, 14, 25, 0.68);
+  border: 1px solid rgba(148, 163, 184, 0.22);
   box-shadow: 0 36px 72px rgba(5, 6, 15, 0.55);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(14px);
 }
 
 body.is-host .student-only {
@@ -1309,23 +1320,26 @@ body.is-student .host-only {
 }
 
 .control-dock {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.9rem;
+  flex-wrap: wrap;
 }
 
+
 .control-more-menu {
-  position: absolute;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 4vh + 110px);
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--control-offset));
   left: 50%;
   transform: translate(-50%, 12px) scale(0.96);
-  background: rgba(12, 14, 25, 0.82);
-  border-radius: 28px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(12, 14, 25, 0.92);
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
   backdrop-filter: blur(28px);
   box-shadow: 0 36px 76px rgba(4, 5, 12, 0.6);
   padding: 1.2rem 1.6rem;
-  z-index: 55;
+  z-index: 90;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -1336,6 +1350,66 @@ body.is-student .host-only {
   opacity: 1;
   pointer-events: auto;
   transform: translate(-50%, 0) scale(1);
+}
+
+.camera-menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -6px) scale(0.98);
+  min-width: 180px;
+  padding: 0.5rem;
+  display: grid;
+  gap: 0.35rem;
+  border-radius: 18px;
+  background: rgba(15, 16, 24, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  box-shadow: 0 28px 52px rgba(5, 6, 15, 0.55);
+  backdrop-filter: blur(18px);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 120;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.camera-menu.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.camera-menu button {
+  width: 100%;
+  border-radius: 14px;
+  padding: 0.65rem 0.9rem;
+  background: transparent;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.6rem;
+  font-weight: 500;
+}
+
+.camera-menu button:hover,
+.camera-menu button:focus {
+  background: rgba(99, 102, 241, 0.16);
+  outline: none;
+}
+
+.camera-menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.control-btn.menu-open,
+.ghost.menu-open,
+button.menu-open {
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--text);
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.28);
 }
 
 .menu-grid {
@@ -1941,6 +2015,46 @@ utility-panel {
 
 .chat-form {
   margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.chat-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-send {
+  flex: 0 0 auto;
+  padding: 0.65rem 1.35rem;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-weight: 600;
+  border: none;
+  box-shadow: 0 14px 28px rgba(99, 102, 241, 0.28);
+}
+
+.chat-send span {
+  pointer-events: none;
+}
+
+.chat-send:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+#chat-drawer .chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+
+#chat-drawer {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
 }
 
 .side-drawer .participants {
@@ -1956,30 +2070,35 @@ utility-panel {
 }
 
 @media (max-width: 960px) {
+  :root {
+    --control-offset: 7.5rem;
+  }
   .meeting-header {
-    top: 1.75rem;
+    top: 1.25rem;
+    width: min(720px, calc(100% - 2.5rem));
   }
   .control-btn {
     width: 54px;
     height: 54px;
   }
-  .control-more-menu {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 4vh + 100px);
-    padding: 1rem 1.35rem;
-  }
   .stage-pip {
-    bottom: 2.6rem;
-    right: 2.6rem;
+    bottom: 2.2rem;
+    right: 2.2rem;
     width: 210px;
   }
 }
 
-
 @media (max-width: 720px) {
+  :root {
+    --control-offset: 8.75rem;
+  }
+  #live-view {
+    min-height: 100dvh;
+  }
   .meeting-header {
-    top: 1.2rem;
-    width: calc(100% - 2.4rem);
-    padding: 0.65rem 1.25rem;
+    top: 1rem;
+    width: calc(100% - 2rem);
+    padding: 0.7rem 1.3rem;
   }
   .meeting-heading h2 {
     font-size: 1.22rem;
@@ -1988,27 +2107,31 @@ utility-panel {
     width: 50px;
     height: 50px;
   }
-  .control-more-menu {
-    width: calc(100% - 3rem);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 4vh + 82px);
+  .meeting-controls {
+    width: calc(100% - 1.75rem);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
   }
-  .menu-btn {
-    padding: 0.6rem 0.75rem;
+  .control-more-menu {
+    width: calc(100% - 2.2rem);
   }
   .stage-pip {
-    bottom: 1.8rem;
-    right: 1.8rem;
+    bottom: 1.6rem;
+    right: 1.6rem;
     width: 180px;
+  }
+  .side-drawer {
+    height: 100dvh;
   }
 }
 
-
 @media (max-width: 560px) {
+  :root {
+    --control-offset: 9.5rem;
+  }
   .meeting-header {
-    width: calc(100% - 1.8rem);
-    left: 50%;
-    transform: translateX(-50%);
+    width: calc(100% - 1.6rem);
     flex-direction: column;
+    align-items: flex-start;
     gap: 0.5rem;
   }
   .meeting-heading h2 {
@@ -2018,81 +2141,59 @@ utility-panel {
     width: 46px;
     height: 46px;
   }
+  .control-dock {
+    gap: 0.65rem;
+  }
+  .meeting-controls .control-bar {
+    padding: 0.65rem 1.2rem;
+  }
   .control-more-menu {
-    width: calc(100% - 2rem);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 4vh + 70px);
-    padding: 0.9rem 1rem;
-  }
-  .menu-grid {
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  }
-  .menu-btn {
-    gap: 0.6rem;
+    width: calc(100% - 1.8rem);
   }
   .stage-pip {
     position: static;
     width: 160px;
-    margin: 0.75rem auto 0;
+    margin: 1rem auto 0;
   }
   .live-toast {
-    width: calc(100% - 2.5rem);
-    padding: 1.1rem 1.6rem;
-    font-size: 0.98rem;
+    width: calc(100% - 2.4rem);
   }
 }
 
 @media (max-width: 420px) {
+  :root {
+    --control-offset: 10rem;
+  }
   .status-card {
     padding: 1.8rem 1.4rem;
     border-radius: 24px;
     gap: 0.75rem;
   }
-  .meeting-heading:{
-    text-align: left!important;
+  .meeting-header {
+    width: calc(100% - 1.2rem);
+    padding: 0.6rem 0.95rem;
   }
-    .meeting-header {
-        top: 0.8rem;
-        width: calc(100% - 1.4rem);
-        padding: 0.55rem 0.95rem;
-        border-radius: 0px;
-        border: 0px;
-        display: flex;
-        flex-direction: row;
-        max-width: 111%;
-        top: 0;
-        left: 203px;
-        justify-content: space-between;
-    }
   .meeting-heading h2 {
-    font-size: 1.02rem;
-  }
- .stage-live-watermark img {
-    opacity: 0.72;
-    display: none;
-}
-  .meeting-controls .control-bar {
-    gap: 0.55rem;
-    padding: 0.65rem 1rem;
-  }
-  .control-dock {
-    gap: 0.55rem;
+    font-size: 1.04rem;
   }
   .control-btn {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
+  }
+  .control-dock {
+    gap: 0.5rem;
+  }
+  .meeting-controls .control-bar {
+    padding: 0.6rem 0.85rem;
+    gap: 0.6rem;
   }
   .control-more-menu {
-    width: calc(100% - 1.4rem);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 4vh + 64px);
-    padding: 0.8rem 0.9rem;
-  }
-  .stage-pip {
-    width: 140px;
+    width: calc(100% - 1.2rem);
   }
   .live-toast {
-    width: calc(100% - 1.6rem);
+    width: calc(100% - 1.5rem);
     padding: 1rem 1.4rem;
-    font-size: 0.94rem;
+    font-size: 0.95rem;
   }
 }
 
