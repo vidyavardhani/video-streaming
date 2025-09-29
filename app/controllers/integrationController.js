@@ -153,7 +153,7 @@ exports.createMeeting = async (req, res) => {
     const klass = await ClassModel.create({
       title,
       meetingCode,
-      meetingLink: `${process.env.BASE_URL || 'http://localhost:4000'}/class/${meetingCode}`,
+      meetingLink: `${process.env.BASE_URL || 'https://stream.kalp.ltd'}/class/${meetingCode}`,
       host: hostUser,
       developerKey: hostKey.developerKey,
       hostKey: hostKey._id

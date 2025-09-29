@@ -102,7 +102,7 @@
     }
   ],
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "baseUrl", "value": "https://stream.kalp.ltd" },
     { "key": "developerKey", "value": "" },
     { "key": "hostId", "value": "" },
     { "key": "classId", "value": "" }

@@ -7,7 +7,7 @@ module.exports = {
   },
   servers: [
     {
-      url: 'http://localhost:4000',
+      url: 'https://stream.kalp.ltd',
       description: 'Local server'
     }
   ],

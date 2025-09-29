@@ -24,7 +24,7 @@ This project delivers a Google Meet–style experience for teachers and students
    ```env
    MONGO_URI=mongodb://127.0.0.1:27017/video-streaming
    JWT_SECRET=super-secret-key
-   BASE_URL=http://localhost:4000
+   BASE_URL=https://stream.kalp.ltd
    ```
 
 3. **Run the development server**
@@ -33,7 +33,7 @@ This project delivers a Google Meet–style experience for teachers and students
    ```
 
 4. **Open the app**
-   - Visit `http://localhost:4000` to register or log in.
+   - Visit `https://stream.kalp.ltd` to register or log in.
    - Teachers land on the dashboard to create classes.
    - Share the class link or code with students (`/class/:id`). Students only need their name to request access.
    - The host admits students from the lobby drawer and, once live, their camera or shared screen is broadcast to everyone.

@@ -8,7 +8,7 @@ const { ensureChatRoom, ensureWhiteboard } = require('../utils/classState');
 const { upsertAutoJoinEntry, syncAutoJoinees } = require('../utils/autoJoin');
 const { getIO } = require('../sockets/manager');
 
-const baseUrl = () => process.env.BASE_URL || 'http://localhost:4000';
+const baseUrl = () => process.env.BASE_URL || 'https://stream.kalp.ltd';
 
 const generateMeetingCode = async () => {
   for (let attempts = 0; attempts < 8; attempts += 1) {
