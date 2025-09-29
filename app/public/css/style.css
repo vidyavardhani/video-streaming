@@ -1379,7 +1379,7 @@ body.is-student .participant-strip {
 .meeting-controls {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
-  left: 50%;
+  left: 25%;
   transform: translateX(-50%);
   width: min(720px, calc(100% - 2.5rem));
   display: flex;

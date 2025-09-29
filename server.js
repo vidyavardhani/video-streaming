@@ -8,6 +8,10 @@ const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const docs = require('./docs/swagger');
+const { spawn } = require('child_process');
+const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const registerSocketHandlers = require('./app/sockets');
 
@@ -85,3 +89,22 @@ const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
+
+
+const client = new S3Client({
+  region: "ap-southeast-2",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
+});
+
+async function getLink() {
+  const command = new GetObjectCommand({
+    Bucket: "rapydlaunchbucket",
+    Key: "recordings/895-114-555/1759133434963.mp4"
+  });
+  const url = await getSignedUrl(client, command, { expiresIn: 3600 });
+  console.log("Pre-signed URL:", url);
+}
+getLink();
