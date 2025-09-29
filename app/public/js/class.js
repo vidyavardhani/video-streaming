@@ -1181,7 +1181,7 @@
     copyCode: document.getElementById('copy-code'),
     shareInfo: document.getElementById('share-info'),
     emailInvite: document.getElementById('email-invite'),
-    meetingShell: document.querySelector('.meeting-shell'),
+
     meetingControls: document.querySelector('.meeting-controls'),
     meetingParticipantCount: document.getElementById('meeting-participant-count'),
     meetingMicStatus: document.getElementById('meeting-mic-status'),
