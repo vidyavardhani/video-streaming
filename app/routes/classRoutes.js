@@ -42,6 +42,8 @@ router.patch(
 );
 router.post('/:code/whiteboard/clear', auth.authenticate, engagementController.clearWhiteboard);
 router.post('/:code/recording/start', auth.authenticate, engagementController.startRecording);
+router.post('/:code/recording/pause', auth.authenticate, engagementController.pauseRecording);
+router.post('/:code/recording/resume', auth.authenticate, engagementController.resumeRecording);
 router.post('/:code/recording/stop', auth.authenticate, engagementController.stopRecording);
 router.get('/mine', auth.authenticate, classController.mine);
 router.get('/live/all', classController.live);

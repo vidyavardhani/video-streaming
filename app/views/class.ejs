@@ -89,6 +89,18 @@
                 </svg>
               </span>
             </button>
+            <div class="meeting-stats" id="meeting-stats" aria-live="polite">
+              <span class="stat-chip" id="meeting-participant-stat">
+                <span class="stat-icon">👥</span>
+                <span class="stat-label">Participants</span>
+                <span class="stat-value" id="meeting-participant-count">0</span>
+              </span>
+              <span class="stat-chip" id="meeting-mic-stat">
+                <span class="stat-icon">🎤</span>
+                <span class="stat-label">Mic</span>
+                <span class="stat-value" id="meeting-mic-status">Muted</span>
+              </span>
+            </div>
             <span class="status-chip live">
               <span class="dot"></span>
               Live
@@ -111,18 +123,21 @@
           </div>
           <div id="participant-strip" class="participant-strip"></div>
         </div>
-        <div id="chat-drawer" class="side-drawer hidden" aria-hidden="true">
-          <div class="drawer-header">
-            <h3>Chat</h3>
-            <button id="chat-close" class="ghost small" type="button">Close</button>
+        <div id="chat-overlay" class="chat-overlay hidden" aria-hidden="true">
+          <div class="chat-overlay-backdrop" data-dismiss="chat"></div>
+          <div id="chat-drawer" class="chat-overlay-panel" role="dialog" aria-modal="true" aria-labelledby="chat-title">
+            <div class="drawer-header">
+              <h3 id="chat-title">Class chat</h3>
+              <button id="chat-close" class="ghost small" type="button">Close</button>
+            </div>
+            <div id="chat-messages" class="chat-messages"></div>
+            <form id="chat-form" class="chat-form">
+              <input id="chat-text" type="text" placeholder="Send a message" autocomplete="off">
+              <button type="submit" class="chat-send" aria-label="Send message">
+                <span>Send</span>
+              </button>
+            </form>
           </div>
-          <div id="chat-messages" class="chat-messages"></div>
-          <form id="chat-form" class="chat-form">
-            <input id="chat-text" type="text" placeholder="Send a message" autocomplete="off">
-            <button type="submit" class="chat-send" aria-label="Send message">
-              <span>Send</span>
-            </button>
-          </form>
         </div>
         <div id="participants-drawer" class="side-drawer hidden" aria-hidden="true">
           <div class="drawer-header">
@@ -144,6 +159,46 @@
           </div>
         </div>
         <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
+        <div id="floating-controls" class="floating-controls">
+          <button id="quick-record" class="floating-btn host-only hidden" type="button" aria-pressed="false" aria-label="Start recording">
+            <span class="icon">
+              <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                <circle cx="12" cy="12" r="5" fill="currentColor"></circle>
+                <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+              </svg>
+            </span>
+            <span class="label">Record</span>
+          </button>
+          <button id="quick-camera" class="floating-btn hidden" type="button" aria-label="Switch camera">
+            <span class="icon">
+              <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                <rect x="4" y="6" width="12" height="12" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+                <path d="M16 10l4-3v10l-4-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+                <path d="M8 5l-2 2 2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                <path d="M16 19l2-2-2-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+              </svg>
+            </span>
+            <span class="label">Flip</span>
+          </button>
+          <button id="quick-orientation" class="floating-btn" type="button" aria-pressed="false" aria-label="Switch layout">
+            <span class="icon">
+              <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                <rect x="5" y="5" width="14" height="14" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+                <path d="M9 9h6v6H9z" fill="currentColor"></path>
+              </svg>
+            </span>
+            <span class="label">Portrait</span>
+          </button>
+          <button id="quick-chat" class="floating-btn" type="button" aria-haspopup="dialog" aria-controls="chat-drawer" aria-label="Open chat">
+            <span class="icon">
+              <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                <path d="M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-4.5L9 21v-4H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+              </svg>
+            </span>
+            <span class="label">Chat</span>
+            <span id="quick-chat-badge" class="floating-badge hidden" aria-hidden="true">0</span>
+          </button>
+        </div>
         <div id="utility-panel" class="utility-panel hidden">
           <div class="utility-header">
             <div>
@@ -207,6 +262,7 @@
                 <div id="recording-status" class="recording-status">Recording inactive</div>
                 <div class="recording-actions">
                   <button id="recording-start" class="primary small">Start recording</button>
+                  <button id="recording-pause" class="ghost small">Pause recording</button>
                   <button id="recording-stop" class="ghost small">Stop recording</button>
                 </div>
                 <div id="recording-link" class="recording-link hidden"></div>
@@ -276,21 +332,37 @@
               </button>
 
       <!-- ✅ New Participants button directly in dock -->
-      <button id="toggle-participants" class="control-btn" type="button" aria-label="Participants" data-tooltip="Participants">
-        <span class="icon">
-          <svg viewBox="0 0 24 24" role="presentation" focusable="false">
-            <path d="M12 12a3.5 3.5 0 1 0-3.5-3.5A3.5 3.5 0 0 0 12 12z" fill="none" stroke="currentColor" stroke-width="1.6"></path>
-            <path d="M6 20v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
-          </svg>
-        </span>
-        <span class="control-badges">
-          <span id="participants-count-badge" class="control-badge hidden" aria-hidden="true">0</span>
-          <span id="participants-lobby-badge" class="control-badge subtle hidden" aria-hidden="true">0</span>
-        </span>
-      </button>
+              <button id="toggle-participants" class="control-btn" type="button" aria-label="Participants" data-tooltip="Participants">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <path d="M12 12a3.5 3.5 0 1 0-3.5-3.5A3.5 3.5 0 0 0 12 12z" fill="none" stroke="currentColor" stroke-width="1.6"></path>
+                    <path d="M6 20v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                  </svg>
+                </span>
+                <span class="control-badges">
+                  <span id="participants-count-badge" class="control-badge hidden" aria-hidden="true">0</span>
+                  <span id="participants-lobby-badge" class="control-badge subtle hidden" aria-hidden="true">0</span>
+                </span>
+              </button>
 
-           
 
+
+              <button id="layout-landscape" class="control-btn" type="button" aria-label="Landscape layout" data-tooltip="Landscape layout">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <rect x="4" y="7" width="16" height="10" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+                    <path d="M7 10h4v4H7z" fill="currentColor"></path>
+                  </svg>
+                </span>
+              </button>
+              <button id="layout-portrait" class="control-btn" type="button" aria-label="Portrait layout" data-tooltip="Portrait layout">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <rect x="8" y="4" width="8" height="16" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+                    <path d="M10 7h4v4h-4z" fill="currentColor"></path>
+                  </svg>
+                </span>
+              </button>
               <button id="screen-share" class="control-btn host-only" type="button" aria-label="Share screen" data-tooltip="Screen share">
                 <span class="icon">
                   <svg viewBox="0 0 24 24" role="presentation" focusable="false">

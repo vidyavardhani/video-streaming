@@ -115,7 +115,7 @@
     activePoll: null,
     pollHistory: [],
     questions: [],
-    recording: { isRecording: false },
+    recording: { isRecording: false, isPaused: false },
     raisedHands: new Map(),
     mediaStates: new Map(),
     handRaised: false,
@@ -143,10 +143,66 @@
     cameraMenuResizeAttached: false,
     controlCenterOpen: false,
     directChats: new Map(),
-    activeDirectChat: null
+    activeDirectChat: null,
+    layout: 'landscape',
+    controlsVisible: true,
+    controlsTimer: null
   };
 
   state.mediaStates.set('host', { audio: false, video: false });
+
+  const tonePlayer = (() => {
+    let context = null;
+    const ensureContext = async () => {
+      if (typeof window === 'undefined') return null;
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return null;
+      if (!context) {
+        context = new AudioContext();
+      }
+      if (context.state === 'suspended') {
+        try {
+          await context.resume();
+        } catch (error) {
+          /* ignore */
+        }
+      }
+      return context;
+    };
+
+    const play = async (frequency = 880, duration = 0.3) => {
+      try {
+        const ctx = await ensureContext();
+        if (!ctx) return;
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        gain.gain.value = 0;
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.22, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        oscillator.start(now);
+        oscillator.stop(now + duration + 0.05);
+      } catch (error) {
+        /* ignore tone playback issues */
+      }
+    };
+
+    const warmup = () => {
+      ensureContext();
+    };
+
+    return {
+      play,
+      warmup
+    };
+  })();
+
+  window.addEventListener('pointerdown', () => tonePlayer.warmup(), { once: true, passive: true });
 
   const hostTrackRegistry = new WeakSet();
   const remoteTrackGuards = new WeakMap();
@@ -524,6 +580,12 @@
     copyCode: document.getElementById('copy-code'),
     shareInfo: document.getElementById('share-info'),
     emailInvite: document.getElementById('email-invite'),
+    meetingShell: document.querySelector('.meeting-shell'),
+    meetingControls: document.querySelector('.meeting-controls'),
+    meetingParticipantCount: document.getElementById('meeting-participant-count'),
+    meetingMicStatus: document.getElementById('meeting-mic-status'),
+    meetingParticipantStat: document.getElementById('meeting-participant-stat'),
+    meetingMicStat: document.getElementById('meeting-mic-stat'),
     chatForm: document.getElementById('chat-form'),
     chatInput: document.getElementById('chat-text'),
     chatMessages: document.getElementById('chat-messages'),
@@ -544,11 +606,20 @@
     participantsToggle: document.getElementById('toggle-participants'),
     participantsBadge: document.getElementById('participants-count-badge'),
     lobbyBadge: document.getElementById('participants-lobby-badge'),
+    layoutLandscape: document.getElementById('layout-landscape'),
+    layoutPortrait: document.getElementById('layout-portrait'),
     chatClose: document.getElementById('chat-close'),
     participantsClose: document.getElementById('participants-close'),
+    chatOverlay: document.getElementById('chat-overlay'),
     chatDrawer: document.getElementById('chat-drawer'),
     participantsDrawer: document.getElementById('participants-drawer'),
     drawerBackdrop: document.getElementById('drawer-backdrop'),
+    floatingControls: document.getElementById('floating-controls'),
+    quickRecord: document.getElementById('quick-record'),
+    quickCamera: document.getElementById('quick-camera'),
+    quickOrientation: document.getElementById('quick-orientation'),
+    quickChat: document.getElementById('quick-chat'),
+    quickChatBadge: document.getElementById('quick-chat-badge'),
     whiteboardCanvas: document.getElementById('whiteboard-canvas'),
     whiteboardClear: document.getElementById('whiteboard-clear'),
     whiteboardColor: document.getElementById('whiteboard-color'),
@@ -572,6 +643,7 @@
     recordingStatus: document.getElementById('recording-status'),
     recordingStart: document.getElementById('recording-start'),
     recordingStop: document.getElementById('recording-stop'),
+    recordingPause: document.getElementById('recording-pause'),
     recordingLink: document.getElementById('recording-link'),
     handRaiseBtn: document.getElementById('hand-raise-btn'),
     raisedHands: document.getElementById('raised-hands'),
@@ -619,7 +691,8 @@
     modalTitle: document.getElementById('modal-title'),
     modalMessage: document.getElementById('modal-message'),
     modalPrimary: document.getElementById('modal-primary'),
-    modalSecondary: document.getElementById('modal-secondary')
+    modalSecondary: document.getElementById('modal-secondary'),
+    stage: document.querySelector('.stage')
   };
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -839,8 +912,9 @@
   }
 
   class ChatManager {
-    constructor({ badgeEl } = {}) {
+    constructor({ badgeEl, floatingBadgeEl } = {}) {
       this.badgeEl = badgeEl;
+      this.floatingBadgeEl = floatingBadgeEl || null;
       this.unread = 0;
       this.drawerOpen = false;
       this.toneManager = null;
@@ -880,14 +954,21 @@
       this.sync();
     }
 
-    sync() {
-      if (!this.badgeEl) return;
+    updateBadgeElement(element) {
+      if (!element) return;
       if (this.unread > 0) {
-        this.badgeEl.textContent = String(this.unread);
-        this.badgeEl.classList.remove('hidden');
+        element.textContent = String(this.unread);
+        element.classList.remove('hidden');
+        element.setAttribute('aria-hidden', 'false');
       } else {
-        this.badgeEl.classList.add('hidden');
+        element.classList.add('hidden');
+        element.setAttribute('aria-hidden', 'true');
       }
+    }
+
+    sync() {
+      this.updateBadgeElement(this.badgeEl);
+      this.updateBadgeElement(this.floatingBadgeEl);
     }
   }
 
@@ -2588,7 +2669,18 @@
   let hostMediaSync;
 
   const playTone = (preset) => {
-    toneManager?.play(preset);
+    const wasHandled = toneManager?.play(preset);
+    if (toneManager && toneManager.enabled !== false && wasHandled !== false) {
+      return;
+    }
+    if (!tonePlayer) return;
+    if (preset === 'join') {
+      tonePlayer.play(880, 0.28);
+    } else if (preset === 'leave') {
+      tonePlayer.play(520, 0.32);
+    } else if (preset === 'hand') {
+      tonePlayer.play(940, 0.24);
+    }
   };
 
   const FOCUSABLE_SELECTOR = [
@@ -2744,39 +2836,51 @@
   };
 
   const syncDrawerState = () => {
-    const map = {
-      chat: elements.chatDrawer,
-      participants: elements.participantsDrawer
-    };
-    Object.entries(map).forEach(([name, drawer]) => {
-      if (!drawer) return;
-      const isOpen = state.activeDrawer === name;
-      drawer.classList.toggle('open', isOpen);
-      drawer.classList.toggle('hidden', !isOpen);
-      drawer.setAttribute('aria-hidden', (!isOpen).toString());
-    });
-    const showBackdrop = !!state.activeDrawer;
+    const participantsOpen = state.activeDrawer === 'participants';
+    if (elements.participantsDrawer) {
+      elements.participantsDrawer.classList.toggle('open', participantsOpen);
+      elements.participantsDrawer.classList.toggle('hidden', !participantsOpen);
+      elements.participantsDrawer.setAttribute('aria-hidden', (!participantsOpen).toString());
+    }
+    const chatOpen = state.activeDrawer === 'chat';
+    if (elements.chatOverlay) {
+      elements.chatOverlay.classList.toggle('open', chatOpen);
+      elements.chatOverlay.classList.toggle('hidden', !chatOpen);
+      elements.chatOverlay.setAttribute('aria-hidden', (!chatOpen).toString());
+    }
+    if (elements.chatDrawer) {
+      elements.chatDrawer.setAttribute('aria-hidden', (!chatOpen).toString());
+      elements.chatDrawer.classList.toggle('open', chatOpen);
+    }
+    const showBackdrop = !!state.activeDrawer && state.activeDrawer !== 'chat';
     if (elements.drawerBackdrop) {
       elements.drawerBackdrop.classList.toggle('hidden', !showBackdrop);
     }
     if (elements.chatToggle) {
-      elements.chatToggle.setAttribute('aria-pressed', (state.activeDrawer === 'chat').toString());
+      elements.chatToggle.setAttribute('aria-pressed', chatOpen.toString());
     }
     if (elements.participantsToggle) {
-      elements.participantsToggle.setAttribute('aria-pressed', (state.activeDrawer === 'participants').toString());
+      elements.participantsToggle.setAttribute('aria-pressed', participantsOpen.toString());
     }
-    chatManager?.setDrawerState(state.activeDrawer === 'chat');
+    if (elements.quickChat) {
+      elements.quickChat.classList.toggle('is-active', chatOpen);
+      elements.quickChat.setAttribute('aria-pressed', chatOpen.toString());
+      elements.quickChat.setAttribute('aria-label', chatOpen ? 'Close chat' : 'Open chat');
+    }
+    chatManager?.setDrawerState(chatOpen);
   };
 
   const openDrawer = (name) => {
     state.activeDrawer = name;
     syncDrawerState();
+    registerOverlayInteraction({ autoHide: false });
   };
 
   const closeDrawer = () => {
     state.activeDrawer = null;
     syncDrawerState();
     closeMoreMenu();
+    registerOverlayInteraction({ autoHide: true });
   };
 
   const toggleDrawer = (name) => {
@@ -2791,16 +2895,41 @@
   const updateRecordingStatus = () => {
     if (!elements.recordingStatus) return;
     const isRecording = !!state.recording?.isRecording;
-    elements.recordingStatus.textContent = isRecording ? 'Recording in progress…' : 'Recording inactive';
-    elements.recordingStatus.classList.toggle('active', isRecording);
+    const isPaused = !!state.recording?.isPaused;
+    let statusText = 'Recording inactive';
+    if (isRecording) {
+      statusText = isPaused ? 'Recording paused' : 'Recording in progress…';
+    }
+    elements.recordingStatus.textContent = statusText;
+    elements.recordingStatus.classList.toggle('active', isRecording && !isPaused);
+    elements.recordingStatus.classList.toggle('paused', isPaused);
     if (elements.recordingStart) {
       elements.recordingStart.classList.toggle('hidden', !state.isHost || isRecording);
     }
     if (elements.recordingStop) {
       elements.recordingStop.classList.toggle('hidden', !state.isHost || !isRecording);
     }
+    if (elements.recordingPause) {
+      elements.recordingPause.classList.toggle('hidden', !state.isHost || !isRecording);
+      elements.recordingPause.textContent = isPaused ? 'Resume recording' : 'Pause recording';
+      elements.recordingPause.classList.toggle('is-active', isPaused);
+      elements.recordingPause.setAttribute('aria-pressed', isPaused.toString());
+      elements.recordingPause.setAttribute('aria-label', isPaused ? 'Resume recording' : 'Pause recording');
+    }
+    if (elements.quickRecord) {
+      const nextLabel = isRecording ? 'Stop' : 'Record';
+      const quickLabel = elements.quickRecord.querySelector('.label');
+      if (quickLabel) {
+        quickLabel.textContent = nextLabel;
+      }
+      elements.quickRecord.classList.toggle('hidden', !state.isHost);
+      elements.quickRecord.classList.toggle('is-active', isRecording);
+      elements.quickRecord.setAttribute('aria-pressed', isRecording.toString());
+      elements.quickRecord.setAttribute('aria-label', `${isRecording ? 'Stop' : 'Start'} recording`);
+      elements.quickRecord.setAttribute('aria-hidden', (!state.isHost).toString());
+    }
     if (elements.recordingLink) {
-      const link = state.classInfo?.recordedVideoLink;
+      const link = state.classInfo?.recordingClassLink || state.classInfo?.recordedVideoLink;
       if (link) {
         elements.recordingLink.classList.remove('hidden');
         elements.recordingLink.innerHTML = `<a href="${link}" target="_blank" rel="noopener">Download recording</a>`;
@@ -2808,6 +2937,46 @@
         elements.recordingLink.classList.add('hidden');
         elements.recordingLink.textContent = '';
       }
+    }
+  };
+
+  const applyRecordingPayload = (payload = {}) => {
+    if (!payload) return;
+    state.classInfo = state.classInfo || {};
+    const recording = payload.recording || payload;
+    if (recording) {
+      state.recording = { ...recording, isPaused: !!recording.isPaused };
+      state.classInfo.recording = state.recording;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'recordedVideoLink')) {
+      state.classInfo.recordedVideoLink = payload.recordedVideoLink;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'recordingClassLink')) {
+      state.classInfo.recordingClassLink = payload.recordingClassLink;
+    }
+    updateRecordingStatus();
+  };
+
+  const performRecordingAction = async (action) => {
+    if (!state.isHost) return null;
+    try {
+      const res = await fetch(`/classes/${classCode}/recording/${action}`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.message || `Unable to ${action} recording`);
+      }
+      const data = await res.json();
+      if (action === 'start') {
+        state.classInfo.recordedVideoLink = null;
+        state.classInfo.recordingClassLink = null;
+      }
+      applyRecordingPayload(data);
+      return data;
+    } catch (error) {
+      alert(error.message || `Unable to ${action} recording`);
+      throw error;
+    } finally {
+      registerOverlayInteraction({ autoHide: true });
     }
   };
 
@@ -3268,6 +3437,99 @@
     window.dispatchEvent(new CustomEvent('auto-join:update', { detail }));
   };
 
+  const getTotalParticipantsCount = () => {
+    const participants = Array.isArray(state.classInfo?.participants)
+      ? state.classInfo.participants.length
+      : 0;
+    const hostCount = state.classInfo?.host ? 1 : 0;
+    return participants + hostCount;
+  };
+
+  const updateMeetingStats = () => {
+    const total = getTotalParticipantsCount();
+    if (elements.meetingParticipantCount) {
+      elements.meetingParticipantCount.textContent = total.toString();
+    }
+    if (elements.meetingParticipantStat) {
+      elements.meetingParticipantStat.classList.toggle('active', total > 0);
+    }
+    const audioEnabled = !!state.localStream?.getTracks()?.some((track) => track.kind === 'audio' && track.enabled);
+    if (elements.meetingMicStatus) {
+      elements.meetingMicStatus.textContent = audioEnabled ? 'Mic on' : 'Mic off';
+    }
+    if (elements.meetingMicStat) {
+      elements.meetingMicStat.classList.toggle('active', audioEnabled);
+    }
+  };
+
+  const isStreamActive = (stream) => {
+    if (!stream || typeof stream.getTracks !== 'function') {
+      return false;
+    }
+    return stream.getTracks().some((track) => track.readyState === 'live');
+  };
+
+  const hideOverlayControls = () => {
+    if (state.controlsTimer) {
+      window.clearTimeout(state.controlsTimer);
+      state.controlsTimer = null;
+    }
+    if (!elements.meetingShell) return;
+    elements.meetingShell.classList.add('controls-hidden');
+    elements.meetingShell.classList.remove('controls-visible');
+    state.controlsVisible = false;
+  };
+
+  const ensureOverlayControlsVisible = ({ autoHide = true } = {}) => {
+    if (!elements.meetingShell) return;
+    elements.meetingShell.classList.add('controls-visible');
+    elements.meetingShell.classList.remove('controls-hidden');
+    state.controlsVisible = true;
+    if (state.controlsTimer) {
+      window.clearTimeout(state.controlsTimer);
+      state.controlsTimer = null;
+    }
+    if (autoHide && !state.activeDrawer) {
+      state.controlsTimer = window.setTimeout(() => {
+        state.controlsTimer = null;
+        hideOverlayControls();
+      }, 1000);
+    }
+  };
+
+  const registerOverlayInteraction = ({ autoHide = true } = {}) => {
+    ensureOverlayControlsVisible({ autoHide });
+  };
+
+  const setLayout = (layout) => {
+    const next = layout === 'portrait' ? 'portrait' : 'landscape';
+    state.layout = next;
+    if (elements.meetingShell) {
+      elements.meetingShell.classList.remove('layout-landscape', 'layout-portrait');
+      elements.meetingShell.classList.add(`layout-${next}`);
+    }
+    const isPortrait = next === 'portrait';
+    if (elements.layoutLandscape) {
+      elements.layoutLandscape.setAttribute('aria-pressed', (!isPortrait).toString());
+      elements.layoutLandscape.classList.toggle('is-active', !isPortrait);
+    }
+    if (elements.layoutPortrait) {
+      elements.layoutPortrait.setAttribute('aria-pressed', isPortrait.toString());
+      elements.layoutPortrait.classList.toggle('is-active', isPortrait);
+    }
+    if (elements.quickOrientation) {
+      const targetLayout = isPortrait ? 'landscape' : 'portrait';
+      const label = elements.quickOrientation.querySelector('.label');
+      if (label) {
+        label.textContent = targetLayout.charAt(0).toUpperCase() + targetLayout.slice(1);
+      }
+      elements.quickOrientation.dataset.target = targetLayout;
+      elements.quickOrientation.setAttribute('aria-pressed', isPortrait.toString());
+      elements.quickOrientation.setAttribute('aria-label', `Switch to ${targetLayout} layout`);
+      elements.quickOrientation.classList.toggle('is-active', isPortrait);
+    }
+  };
+
   const renderParticipants = () => {
     if (!elements.participantsList || !state.classInfo) return;
     const participants = state.classInfo.participants || [];
@@ -3287,6 +3549,8 @@
       span.textContent = icon;
       return span;
     };
+
+    updateMeetingStats();
 
     if (state.classInfo.host) {
       const hostItem = document.createElement('li');
@@ -3462,6 +3726,7 @@
       deviceId: deviceId || null,
       facingMode: facingMode || previousFacing
     };
+    updateQuickCameraButton().catch(() => {});
   };
 
   const refreshAvailableCameras = async () => {
@@ -3472,10 +3737,12 @@
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       state.availableCameras = devices.filter((device) => device.kind === 'videoinput');
+      updateQuickCameraButton(state.availableCameras).catch(() => {});
       return state.availableCameras;
     } catch (error) {
       console.warn('enumerateDevices failed', error);
       state.availableCameras = [];
+      updateQuickCameraButton([]).catch(() => {});
       return [];
     }
   };
@@ -3520,6 +3787,21 @@
     return { deviceId: null, facingMode: nextFacing };
   };
 
+  const updateQuickCameraButton = async (devices) => {
+    if (!elements.quickCamera) return;
+    let list = devices;
+    if (!Array.isArray(list)) {
+      list = await getAvailableCameras();
+    }
+    const preference = await determineNextCameraPreference(list);
+    const hasEnvironmentCamera = Array.isArray(list)
+      ? list.some((device) => /back|rear|environment/i.test(device.label || ''))
+      : false;
+    const shouldShow = !!preference && isMobileDevice() && (hasEnvironmentCamera || (list?.length || 0) > 1);
+    elements.quickCamera.classList.toggle('hidden', !shouldShow);
+    elements.quickCamera.setAttribute('aria-hidden', (!shouldShow).toString());
+  };
+
   const handleCameraMenuResize = () => closeCameraMenu();
 
   const syncCameraMenuOptions = async (options = {}) => {
@@ -3551,6 +3833,7 @@
       menu.classList.add('hidden');
       menu.classList.remove('open');
       menu.setAttribute('aria-hidden', 'true');
+      menu.removeAttribute('data-position');
     }
     if (state.cameraMenuDismiss) {
       document.removeEventListener('click', state.cameraMenuDismiss);
@@ -3584,10 +3867,20 @@
     const scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
     const menu = elements.cameraMenu;
     menu.style.left = `${rect.left + rect.width / 2 + scrollX}px`;
-    menu.style.top = `${rect.bottom + 8 + scrollY}px`;
     menu.classList.remove('hidden');
-    requestAnimationFrame(() => menu.classList.add('open'));
     menu.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => {
+      const bounds = menu.getBoundingClientRect();
+      let top = rect.top + scrollY - bounds.height - 12;
+      let position = 'top';
+      if (top < scrollY + 12) {
+        top = rect.bottom + 12 + scrollY;
+        position = 'bottom';
+      }
+      menu.style.top = `${top}px`;
+      menu.dataset.position = position;
+      menu.classList.add('open');
+    });
     button.classList.add('menu-open');
     button.setAttribute('aria-expanded', 'true');
     const focusTarget = menu.querySelector('button:not(:disabled)');
@@ -3899,17 +4192,28 @@
     stream.getTracks().forEach((track) => track.stop());
   };
 
-  const setupPreview = async () => {
-    if (state.previewReady && state.localStream) {
+  const setupPreview = async ({ force = false } = {}) => {
+    const hasLive = isStreamActive(state.localStream);
+    if (!force && state.previewReady && state.localStream && hasLive) {
       return state.localStream;
     }
-    state.previewReady = true;
     if (!permissionManager) {
       return state.localStream || null;
     }
-    const stream = await permissionManager.ensurePreview();
-    if (stream && !state.localStream) {
-      applyLocalStream(stream, { replace: true });
+    state.previewReady = true;
+    const current = state.localStream;
+    const hadAudioTracks = (current?.getAudioTracks()?.length || 0) > 0 || state.isHost;
+    let hadVideoTracks = (current?.getVideoTracks()?.length || 0) > 0 || state.isHost || !current;
+    if (!hadAudioTracks && !hadVideoTracks) {
+      hadVideoTracks = true;
+    }
+    const stream = await permissionManager.acquireStream({
+      audio: hadAudioTracks,
+      video: hadVideoTracks,
+      replace: true
+    });
+    if (!stream && current && hasLive) {
+      return current;
     }
     return state.localStream || stream || null;
   };
@@ -3950,7 +4254,7 @@
     state.activePoll = state.classInfo.activePoll || null;
     state.pollHistory = state.classInfo.pollHistory || [];
     state.questions = state.classInfo.questions || [];
-    state.recording = state.classInfo.recording || { isRecording: false };
+    state.recording = state.classInfo.recording || { isRecording: false, isPaused: false };
     applyMediaState('host', state.classInfo.hostMediaState || { audio: false, video: false });
     (state.classInfo.participants || []).forEach((participant) => {
       applyMediaState(participant.token, participant.mediaState);
@@ -4553,21 +4857,15 @@
     });
 
     state.socket.on('recording:status', (payload) => {
-      const recording = payload?.recording || payload;
-      state.recording = recording;
-      state.classInfo.recording = recording;
-      if (payload?.recordedVideoLink) {
-        state.classInfo.recordedVideoLink = payload.recordedVideoLink;
-      }
-      updateRecordingStatus();
+      applyRecordingPayload(payload);
     });
 
     state.socket.on('webrtc:signal', handleSignal);
   };
 
   const beginCall = async () => {
-    if (!state.localStream) {
-      await setupPreview();
+    if (!isStreamActive(state.localStream)) {
+      await setupPreview({ force: true });
     }
     if (state.isHost) {
       (state.classInfo.participants || []).forEach((p) => {
@@ -4607,6 +4905,7 @@
     state.mediaStates.clear();
     state.mediaStates.set('host', { audio: false, video: false });
     hostMediaSync?.refreshExpectation?.();
+    state.previewReady = false;
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -5282,36 +5581,69 @@
     }
   });
 
-  elements.recordingStart?.addEventListener('click', async () => {
+  elements.recordingStart?.addEventListener('click', () => {
     if (!state.isHost) return;
-    const res = await fetch(`/classes/${classCode}/recording/start`, { method: 'POST' });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      alert(error.message || 'Unable to start recording');
-      return;
-    }
-    const data = await res.json();
-    state.recording = data;
-    state.classInfo.recording = data;
-    state.classInfo.recordedVideoLink = null;
-    updateRecordingStatus();
+    performRecordingAction('start').catch(() => {});
   });
 
-  elements.recordingStop?.addEventListener('click', async () => {
+  elements.recordingPause?.addEventListener('click', () => {
+    if (!state.isHost || !state.recording?.isRecording) return;
+    const action = state.recording.isPaused ? 'resume' : 'pause';
+    performRecordingAction(action).catch(() => {});
+  });
+
+  elements.recordingStop?.addEventListener('click', () => {
     if (!state.isHost) return;
-    const res = await fetch(`/classes/${classCode}/recording/stop`, { method: 'POST' });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      alert(error.message || 'Unable to stop recording');
+    performRecordingAction('stop').catch(() => {});
+  });
+
+  elements.quickRecord?.addEventListener('click', () => {
+    if (!state.isHost) return;
+    registerOverlayInteraction({ autoHide: true });
+    const action = state.recording?.isRecording ? 'stop' : 'start';
+    performRecordingAction(action).catch(() => {});
+  });
+
+  elements.quickCamera?.addEventListener('click', async () => {
+    registerOverlayInteraction({ autoHide: true });
+    await switchCameraSource();
+  });
+
+  elements.quickOrientation?.addEventListener('click', () => {
+    const targetLayout = elements.quickOrientation?.dataset?.target || (state.layout === 'portrait' ? 'landscape' : 'portrait');
+    setLayout(targetLayout);
+    registerOverlayInteraction({ autoHide: true });
+  });
+
+  elements.quickChat?.addEventListener('click', () => {
+    if (state.activeDrawer === 'chat') {
+      closeDrawer();
+    } else {
+      openDrawer('chat');
+    }
+  });
+
+  elements.floatingControls?.addEventListener('pointerenter', () => registerOverlayInteraction({ autoHide: false }));
+  elements.floatingControls?.addEventListener('pointerleave', () => registerOverlayInteraction({ autoHide: true }));
+  elements.floatingControls?.addEventListener('focusin', () => registerOverlayInteraction({ autoHide: false }));
+  elements.floatingControls?.addEventListener('focusout', () => registerOverlayInteraction({ autoHide: true }));
+  elements.meetingControls?.addEventListener('pointerenter', () => registerOverlayInteraction({ autoHide: false }));
+  elements.meetingControls?.addEventListener('pointerleave', () => registerOverlayInteraction({ autoHide: true }));
+  elements.meetingControls?.addEventListener('focusin', () => registerOverlayInteraction({ autoHide: false }));
+  elements.meetingControls?.addEventListener('focusout', () => registerOverlayInteraction({ autoHide: true }));
+
+  elements.stage?.addEventListener('pointerdown', (event) => {
+    if (state.activeDrawer) return;
+    if (event.target.closest('.floating-controls') || event.target.closest('.meeting-controls')) {
       return;
     }
-    const data = await res.json();
-    state.recording = data.recording;
-    state.classInfo.recording = data.recording;
-    if (data.recordedVideoLink) {
-      state.classInfo.recordedVideoLink = data.recordedVideoLink;
+    registerOverlayInteraction({ autoHide: true });
+  });
+
+  elements.chatOverlay?.addEventListener('click', (event) => {
+    if (event.target === elements.chatOverlay || event.target?.dataset?.dismiss === 'chat') {
+      closeDrawer();
     }
-    updateRecordingStatus();
   });
 
   elements.handRaiseBtn?.addEventListener('click', toggleHandRaise);
@@ -5385,6 +5717,7 @@
   const setToggleState = (button, activeLabel, inactiveLabel, isActive) => {
     if (!button) return;
     button.classList.toggle('is-off', !isActive);
+    button.classList.toggle('is-active', !!isActive);
     const labelNode = button.querySelector('.label, .text');
     if (labelNode) {
       labelNode.textContent = isActive ? activeLabel : inactiveLabel;
@@ -5732,6 +6065,7 @@
     setToggleState(elements.cameraBtn, 'Camera on', 'Camera off', videoEnabled);
     setToggleState(elements.liveCameraToggle, 'Camera on', 'Camera off', videoEnabled);
     updateViewerMediaControls();
+    updateMeetingStats();
   };
 
   const emitMediaUpdate = () => {
@@ -5802,7 +6136,10 @@
       });
     }
     if (!chatManager) {
-      chatManager = new ChatManager({ badgeEl: elements.chatBadge });
+      chatManager = new ChatManager({
+        badgeEl: elements.chatBadge,
+        floatingBadgeEl: elements.quickChatBadge
+      });
     }
     chatManager?.attachToneManager(toneManager);
     if (!permissionManager) {
@@ -6137,6 +6474,14 @@
   elements.participantsToggle?.addEventListener('click', () => toggleDrawer('participants'));
   elements.chatClose?.addEventListener('click', () => closeDrawer());
   elements.participantsClose?.addEventListener('click', () => closeDrawer());
+  elements.layoutLandscape?.addEventListener('click', () => {
+    setLayout('landscape');
+    registerOverlayInteraction({ autoHide: true });
+  });
+  elements.layoutPortrait?.addEventListener('click', () => {
+    setLayout('portrait');
+    registerOverlayInteraction({ autoHide: true });
+  });
   elements.drawerBackdrop?.addEventListener('click', () => closeDrawer());
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -6162,6 +6507,25 @@
   const init = async () => {
     hideRejoinPrompt();
     initializeComponents();
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      try {
+        const orientationMedia = window.matchMedia('(orientation: portrait)');
+        state.layout = orientationMedia.matches ? 'portrait' : 'landscape';
+        const handleOrientationChange = (event) => {
+          setLayout(event.matches ? 'portrait' : 'landscape');
+          registerOverlayInteraction({ autoHide: true });
+        };
+        if (typeof orientationMedia.addEventListener === 'function') {
+          orientationMedia.addEventListener('change', handleOrientationChange);
+        } else if (typeof orientationMedia.addListener === 'function') {
+          orientationMedia.addListener(handleOrientationChange);
+        }
+      } catch (error) {
+        /* ignore orientation detection issues */
+      }
+    }
+    setLayout(state.layout);
+    ensureOverlayControlsVisible({ autoHide: false });
     await loadClass();
     await loadUser();
     state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
@@ -6191,6 +6555,7 @@
       }
     }
     await setupPreview();
+    updateQuickCameraButton().catch(() => {});
     bindTrackToggles();
     bindViewerControls();
     state.lobby = state.classInfo.lobby || [];

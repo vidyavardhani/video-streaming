@@ -149,6 +149,16 @@ module.exports = {
         summary: 'Start server-side recording'
       }
     },
+    '/classes/{code}/recording/pause': {
+      post: {
+        summary: 'Pause server-side recording'
+      }
+    },
+    '/classes/{code}/recording/resume': {
+      post: {
+        summary: 'Resume a paused recording'
+      }
+    },
     '/classes/{code}/recording/stop': {
       post: {
         summary: 'Stop recording and upload to S3'

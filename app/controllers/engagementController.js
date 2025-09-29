@@ -273,12 +273,75 @@ exports.startRecording = async (req, res) => {
 
     getIO().to(klass.meetingCode).emit('recording:status', {
       recording: klass.recording,
-      recordedVideoLink: klass.recordedVideoLink
+      recordedVideoLink: klass.recordedVideoLink,
+      recordingClassLink: klass.recordingClassLink
     });
     return res.json(klass.recording);
   } catch (error) {
     console.error('startRecording error', error);
     return res.status(500).json({ message: 'Unable to start recording' });
+  }
+};
+
+exports.pauseRecording = async (req, res) => {
+  try {
+    const klass = await findClassByCode(req.params.code);
+    if (!klass) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+    if (!ensureHost(klass, req.user)) {
+      return res.status(403).json({ message: 'Only host can pause recording' });
+    }
+    if (!klass.recording?.isRecording) {
+      return res.status(400).json({ message: 'Recording not active' });
+    }
+    if (klass.recording?.isPaused) {
+      return res.status(400).json({ message: 'Recording already paused' });
+    }
+
+    await recordingService.pauseRecording(klass);
+    await klass.save();
+
+    getIO().to(klass.meetingCode).emit('recording:status', {
+      recording: klass.recording,
+      recordedVideoLink: klass.recordedVideoLink,
+      recordingClassLink: klass.recordingClassLink
+    });
+    return res.json({ recording: klass.recording });
+  } catch (error) {
+    console.error('pauseRecording error', error);
+    return res.status(500).json({ message: 'Unable to pause recording' });
+  }
+};
+
+exports.resumeRecording = async (req, res) => {
+  try {
+    const klass = await findClassByCode(req.params.code);
+    if (!klass) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+    if (!ensureHost(klass, req.user)) {
+      return res.status(403).json({ message: 'Only host can resume recording' });
+    }
+    if (!klass.recording?.isRecording) {
+      return res.status(400).json({ message: 'Recording not active' });
+    }
+    if (!klass.recording?.isPaused) {
+      return res.status(400).json({ message: 'Recording is not paused' });
+    }
+
+    await recordingService.resumeRecording(klass);
+    await klass.save();
+
+    getIO().to(klass.meetingCode).emit('recording:status', {
+      recording: klass.recording,
+      recordedVideoLink: klass.recordedVideoLink,
+      recordingClassLink: klass.recordingClassLink
+    });
+    return res.json({ recording: klass.recording });
+  } catch (error) {
+    console.error('resumeRecording error', error);
+    return res.status(500).json({ message: 'Unable to resume recording' });
   }
 };
 
@@ -300,11 +363,13 @@ exports.stopRecording = async (req, res) => {
 
     getIO().to(klass.meetingCode).emit('recording:status', {
       recording: klass.recording,
-      recordedVideoLink: klass.recordedVideoLink
+      recordedVideoLink: klass.recordedVideoLink,
+      recordingClassLink: klass.recordingClassLink
     });
     return res.json({
       recording: klass.recording,
-      recordedVideoLink: link
+      recordedVideoLink: link,
+      recordingClassLink: klass.recordingClassLink
     });
   } catch (error) {
     console.error('stopRecording error', error);

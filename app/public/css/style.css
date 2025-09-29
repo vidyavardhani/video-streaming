@@ -226,6 +226,12 @@ button.danger.ghost {
   font-weight: 500;
 }
 
+.pill-btn[aria-pressed='true'],
+.ghost.pill-btn.is-active {
+  background: rgba(37, 99, 235, 0.18);
+  color: #dbeafe;
+}
+
 .control-btn {
   position: relative;
   width: 58px;
@@ -297,6 +303,20 @@ button.danger.ghost {
   box-shadow: 0 30px 52px rgba(5, 6, 15, 0.55);
   background: rgba(24, 26, 40, 0.82);
   border-color: rgba(148, 163, 184, 0.24);
+}
+
+.control-btn:not(.danger)[aria-pressed='true'],
+.control-btn.is-active:not(.danger) {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #fff;
+  box-shadow: 0 32px 64px rgba(37, 99, 235, 0.38);
+}
+
+.control-btn:not(.danger)[aria-pressed='true'] .icon svg,
+.control-btn.is-active:not(.danger) .icon svg {
+  color: inherit;
+  fill: currentColor;
 }
 
 .control-btn:disabled {
@@ -654,6 +674,41 @@ body.is-student #join-btn {
   background: none;
 }
 
+.meeting-shell.layout-portrait .stage {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
+}
+
+.meeting-shell.layout-portrait .stage-main {
+  min-height: 320px;
+}
+
+.meeting-shell.layout-portrait .meeting-controls .control-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+.meeting-shell.layout-portrait .control-dock {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.meeting-shell.layout-portrait .control-btn {
+  width: 100%;
+  height: 52px;
+}
+
+.meeting-shell.layout-portrait .control-btn .icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.meeting-shell.layout-portrait .meeting-controls {
+  width: min(420px, calc(100% - 2.5rem));
+}
+
 #live-view {
   position: relative;
   width: 100%;
@@ -683,6 +738,45 @@ body.is-student #join-btn {
   border: 1px solid rgba(148, 163, 184, 0.22);
   z-index: 40;
   width: min(960px, calc(100% - 3rem));
+}
+
+.meeting-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.88);
+}
+
+.stat-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+.stat-chip.active {
+  color: #bfdbfe;
+}
+
+.stat-icon {
+  font-size: 1rem;
+}
+
+.meeting-stats .stat-value {
+  min-width: 1.75rem;
+  text-align: center;
 }
 
 .meeting-heading {
@@ -1311,6 +1405,148 @@ body.is-student .participant-strip {
   backdrop-filter: blur(14px);
 }
 
+.meeting-shell .meeting-controls {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.meeting-shell.controls-hidden .meeting-controls {
+  opacity: 0;
+  transform: translateY(18px);
+  pointer-events: none;
+}
+
+.meeting-shell.controls-visible .meeting-controls {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.floating-controls {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6.5rem);
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  pointer-events: none;
+  z-index: 85;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.meeting-shell.controls-hidden .floating-controls {
+  opacity: 0;
+  transform: translateY(18px);
+}
+
+.meeting-shell.controls-visible .floating-controls {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.floating-btn {
+  pointer-events: auto;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem 1.05rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  background: rgba(13, 16, 29, 0.84);
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 18px 42px rgba(13, 16, 29, 0.42);
+}
+
+.floating-btn .icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.82);
+  color: #cbd5f5;
+}
+
+.floating-btn .icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.floating-btn .label {
+  pointer-events: none;
+}
+
+.floating-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(148, 163, 184, 0.38);
+}
+
+.floating-btn.is-active,
+.floating-btn:focus-visible {
+  outline: none;
+  border-color: rgba(96, 165, 250, 0.8);
+  background: rgba(59, 130, 246, 0.22);
+  color: #dbeafe;
+  box-shadow: 0 22px 44px rgba(59, 130, 246, 0.26);
+}
+
+.floating-btn.is-active .icon {
+  background: rgba(96, 165, 250, 0.3);
+  color: #dbeafe;
+}
+
+.floating-badge {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: #f43f5e;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(244, 63, 94, 0.42);
+}
+
+.meeting-shell.layout-portrait .floating-controls {
+  top: calc(env(safe-area-inset-top, 0px) + 1.25rem);
+  bottom: auto;
+  right: 1rem;
+  flex-direction: row;
+  gap: 0.75rem;
+}
+
+@media (max-width: 860px) {
+  .floating-controls {
+    right: 1rem;
+  }
+  .floating-btn {
+    font-size: 0.78rem;
+    padding: 0.55rem 0.95rem;
+  }
+  .floating-btn .icon {
+    width: 26px;
+    height: 26px;
+  }
+}
+
+@media (max-width: 540px) {
+  .meeting-shell.layout-portrait .floating-controls {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+}
+
 body.is-host .student-only {
   display: none !important;
 }
@@ -1372,9 +1608,21 @@ body.is-student .host-only {
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
+.camera-menu[data-position='bottom'] {
+  transform: translate(-50%, 6px) scale(0.98);
+}
+
 .camera-menu.open {
   opacity: 1;
   pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.camera-menu.open[data-position='top'] {
+  transform: translate(-50%, -6px) scale(1);
+}
+
+.camera-menu.open[data-position='bottom'] {
   transform: translate(-50%, 0) scale(1);
 }
 
@@ -1905,10 +2153,27 @@ utility-panel {
   color: #f87171;
 }
 
+.recording-status.paused {
+  color: #bfdbfe;
+}
+
+.recording-status.paused::before {
+  content: '⏸';
+  font-size: 0.7rem;
+  color: #93c5fd;
+}
+
 .recording-actions {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.recording-actions .ghost.small.is-active,
+.recording-actions .ghost.small[aria-pressed='true'] {
+  background: rgba(37, 99, 235, 0.18);
+  color: #dbeafe;
+  border-color: rgba(59, 130, 246, 0.4);
 }
 
 .recording-link {
@@ -1994,6 +2259,58 @@ utility-panel {
   }
 }
 
+.chat-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 1.25rem;
+  z-index: 120;
+  pointer-events: none;
+}
+
+.chat-overlay.open {
+  pointer-events: auto;
+}
+
+.chat-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 9, 18, 0.65);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.chat-overlay.open .chat-overlay-backdrop {
+  opacity: 1;
+}
+
+.chat-overlay-panel {
+  position: relative;
+  width: min(420px, 100%);
+  max-height: min(82vh, 520px);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  background: rgba(15, 18, 33, 0.95);
+  border-radius: 24px;
+  padding: 1.5rem 1.5rem calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+  box-shadow: 0 32px 80px rgba(7, 9, 18, 0.68);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  backdrop-filter: blur(18px);
+  transform: translateY(24px);
+  opacity: 0;
+  transition: transform 0.24s ease, opacity 0.24s ease;
+  z-index: 1;
+}
+
+.chat-overlay.open .chat-overlay-panel {
+  transform: translateY(0);
+  opacity: 1;
+}
+
 .drawer-header {
   display: flex;
   align-items: center;
@@ -2051,10 +2368,6 @@ utility-panel {
   min-height: 0;
   max-height: none;
   overflow-y: auto;
-}
-
-#chat-drawer {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
 }
 
 .side-drawer .participants {
