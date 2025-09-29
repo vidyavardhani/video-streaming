@@ -1,8 +1,14 @@
 const express = require('express');
 const { body } = require('express-validator');
+const multer = require('multer');
 const classController = require('../controllers/classController');
 const engagementController = require('../controllers/engagementController');
 const auth = require('../middleware/auth');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024 * 1024 }
+});
 
 const router = express.Router();
 
@@ -44,7 +50,12 @@ router.post('/:code/whiteboard/clear', auth.authenticate, engagementController.c
 router.post('/:code/recording/start', auth.authenticate, engagementController.startRecording);
 router.post('/:code/recording/pause', auth.authenticate, engagementController.pauseRecording);
 router.post('/:code/recording/resume', auth.authenticate, engagementController.resumeRecording);
-router.post('/:code/recording/stop', auth.authenticate, engagementController.stopRecording);
+router.post(
+  '/:code/recording/stop',
+  auth.authenticate,
+  upload.single('recording'),
+  engagementController.stopRecording
+);
 router.get('/mine', auth.authenticate, classController.mine);
 router.get('/live/all', classController.live);
 router.get('/live', classController.live);

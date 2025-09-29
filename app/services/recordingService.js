@@ -1,8 +1,5 @@
-const fs = require('fs');
 const fsp = require('fs/promises');
-const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const region = process.env.AWS_REGION || 'us-east-1';
@@ -21,49 +18,68 @@ if (bucket && accessKeyId && secretAccessKey) {
   });
 }
 
-const activeRecordings = new Map();
+const activeRecordings = new Set();
 
-const getTempPath = (classId) => {
-  const fileName = `${classId}-${Date.now()}.mp4`;
-  return path.join(os.tmpdir(), fileName);
+const ensureDirectory = async (dirPath) => {
+  await fsp.mkdir(dirPath, { recursive: true });
 };
 
-const ensureFileExists = async (filePath) => {
-  try {
-    await fsp.access(filePath, fs.constants.F_OK);
-  } catch (err) {
-    await fsp.writeFile(filePath, Buffer.from('Mock recording placeholder'));
+const normalizeMimeType = (mimeType) => {
+  if (!mimeType || typeof mimeType !== 'string') return 'video/webm';
+  return mimeType.trim().toLowerCase();
+};
+
+const determineExtension = (mimeType) => {
+  const normalized = normalizeMimeType(mimeType);
+  const mapping = {
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/x-matroska': 'mkv',
+    'video/quicktime': 'mov',
+    'video/ogg': 'ogg'
+  };
+  if (mapping[normalized]) {
+    return mapping[normalized];
   }
+  const guess = normalized.split('/')[1];
+  return guess && guess.length < 8 ? guess : 'webm';
 };
 
-const uploadToS3 = async (key, filePath) => {
+const uploadToS3 = async (key, buffer, mimeType) => {
   if (!s3Client) {
     return null;
   }
-  const body = await fsp.readFile(filePath);
   await s3Client.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
-      Body: body,
-      ContentType: 'video/mp4'
+      Body: buffer,
+      ContentType: normalizeMimeType(mimeType)
     })
   );
   return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 };
 
-const stopProcess = (proc) => new Promise((resolve) => {
-  if (!proc) {
-    resolve();
-    return;
-  }
-  proc.once('exit', () => resolve());
+const saveLocalRecording = async (key, buffer) => {
+  const normalizedKey = key.replace(/\\/g, '/');
+  const destinationPath = path.join(__dirname, '../public', normalizedKey);
+  await ensureDirectory(path.dirname(destinationPath));
+  await fsp.writeFile(destinationPath, buffer);
+  return `/public/${normalizedKey}`;
+};
+
+const buildFinalLink = async (key, buffer, mimeType) => {
+  let persistedLink = null;
   try {
-    proc.kill('SIGINT');
+    persistedLink = await uploadToS3(key, buffer, mimeType);
   } catch (error) {
-    resolve();
+    console.error('Failed to upload recording to S3, falling back to local storage', error);
   }
-});
+  if (persistedLink) {
+    return persistedLink;
+  }
+  return saveLocalRecording(key, buffer);
+};
 
 const startRecording = async (klass) => {
   if (!klass) return;
@@ -71,81 +87,27 @@ const startRecording = async (klass) => {
   if (activeRecordings.has(classKey)) {
     return;
   }
-
-  const outputPath = getTempPath(classKey);
-  let ffmpegProcess = null;
-  const ffmpegInput = process.env.FFMPEG_INPUT || null;
-
-  if (ffmpegInput) {
-    const args = [
-      '-y',
-      '-i',
-      ffmpegInput,
-      '-c:v',
-      'copy',
-      outputPath
-    ];
-    ffmpegProcess = spawn('ffmpeg', args, { stdio: 'ignore' });
-  } else {
-    await fsp.writeFile(outputPath, Buffer.from('Simulated recording for class'));
-  }
-
-  activeRecordings.set(classKey, { outputPath, process: ffmpegProcess, paused: false });
+  activeRecordings.add(classKey);
+  const startedAt = new Date();
   klass.recording = {
+    ...(klass.recording || {}),
     isRecording: true,
     isPaused: false,
-    startedAt: new Date(),
+    startedAt,
     pausedAt: null,
-    fileKey: null
+    finishedAt: null,
+    fileKey: null,
+    durationMs: null
   };
   klass.recordedVideoLink = null;
   klass.recordingClassLink = null;
 };
 
-const stopRecording = async (klass) => {
-  if (!klass) return null;
-  const classKey = klass._id.toString();
-  const recording = activeRecordings.get(classKey);
-  if (!recording) {
-    return null;
-  }
-
-  await stopProcess(recording.process);
-  await ensureFileExists(recording.outputPath);
-
-  const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.mp4`;
-  const link = await uploadToS3(fileKey, recording.outputPath);
-  await fsp.unlink(recording.outputPath).catch(() => {});
-  activeRecordings.delete(classKey);
-
-  klass.recording = {
-    isRecording: false,
-    isPaused: false,
-    startedAt: klass.recording?.startedAt || null,
-    pausedAt: null,
-    fileKey
-  };
-  const fallbackLink = `s3://${bucket || 'bucket'}/${fileKey}`;
-  const finalLink = link || fallbackLink;
-  klass.recordedVideoLink = finalLink;
-  klass.recordingClassLink = finalLink;
-  return finalLink;
-};
-
 const pauseRecording = async (klass) => {
   if (!klass) return;
   const classKey = klass._id.toString();
-  const recording = activeRecordings.get(classKey);
-  if (!recording || recording.paused) {
+  if (!activeRecordings.has(classKey)) {
     return;
-  }
-  recording.paused = true;
-  if (recording.process && typeof recording.process.kill === 'function') {
-    try {
-      recording.process.kill('SIGSTOP');
-    } catch (error) {
-      /* ignore pause signalling issues */
-    }
   }
   klass.recording = {
     ...(klass.recording || {}),
@@ -158,17 +120,8 @@ const pauseRecording = async (klass) => {
 const resumeRecording = async (klass) => {
   if (!klass) return;
   const classKey = klass._id.toString();
-  const recording = activeRecordings.get(classKey);
-  if (!recording || !recording.paused) {
+  if (!activeRecordings.has(classKey)) {
     return;
-  }
-  recording.paused = false;
-  if (recording.process && typeof recording.process.kill === 'function') {
-    try {
-      recording.process.kill('SIGCONT');
-    } catch (error) {
-      /* ignore resume signalling issues */
-    }
   }
   klass.recording = {
     ...(klass.recording || {}),
@@ -176,6 +129,48 @@ const resumeRecording = async (klass) => {
     isPaused: false,
     pausedAt: null
   };
+};
+
+const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceholder = false } = {}) => {
+  if (!klass) return null;
+  const classKey = klass._id.toString();
+  activeRecordings.delete(classKey);
+
+  const normalizedMime = normalizeMimeType(mimeType);
+  const providedBuffer = Buffer.isBuffer(buffer)
+    ? buffer
+    : buffer && typeof buffer === 'string'
+      ? Buffer.from(buffer, 'base64')
+      : null;
+
+  if (!providedBuffer || providedBuffer.length === 0) {
+    if (!allowPlaceholder) {
+      throw new Error('Recording data missing');
+    }
+  }
+
+  const finalBuffer = providedBuffer && providedBuffer.length
+    ? providedBuffer
+    : Buffer.from('Recording unavailable');
+
+  const extension = determineExtension(normalizedMime);
+  const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.${extension}`;
+  const link = await buildFinalLink(fileKey, finalBuffer, normalizedMime);
+
+  const parsedDuration = Number(durationMs);
+
+  klass.recording = {
+    ...(klass.recording || {}),
+    isRecording: false,
+    isPaused: false,
+    pausedAt: null,
+    finishedAt: new Date(),
+    durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
+    fileKey
+  };
+  klass.recordedVideoLink = link;
+  klass.recordingClassLink = link;
+  return link;
 };
 
 module.exports = {

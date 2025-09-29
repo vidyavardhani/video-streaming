@@ -550,6 +550,104 @@ button.primary.small {
   align-items: center;
 }
 
+@media (max-width: 900px) {
+  #join-view,
+  #lobby-view,
+  #host-lobby,
+  #live-view,
+  #ended-view {
+    padding: 3rem 1.25rem 4rem;
+  }
+  .join-card {
+    padding: 2.25rem 2.25rem;
+    border-radius: 32px;
+  }
+}
+
+@media (max-width: 720px) {
+  #join-view,
+  #lobby-view,
+  #host-lobby,
+  #live-view,
+  #ended-view {
+    padding: 2.5rem 1.1rem 3.5rem;
+  }
+  .join-card {
+    padding: 2rem 1.6rem;
+    border-radius: 30px;
+    gap: 1.4rem;
+  }
+  .join-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+  .meeting-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+  .meeting-actions button {
+    flex: 1 1 auto;
+  }
+  .meeting-code-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.45rem;
+  }
+  .preview-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+  .preview-controls button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 560px) {
+  #join-view,
+  #lobby-view,
+  #host-lobby,
+  #live-view,
+  #ended-view {
+    padding: 2.25rem 0.9rem 3rem;
+  }
+  .join-card {
+    padding: 1.75rem 1.35rem;
+    border-radius: 26px;
+    gap: 1.25rem;
+  }
+  .preview-video-wrapper {
+    border-radius: 22px;
+  }
+  .meeting-code-card {
+    border-radius: 20px;
+  }
+  .meeting-actions button {
+    flex: 1 1 calc(50% - 0.4rem);
+    min-width: 140px;
+  }
+}
+
+@media (max-width: 420px) {
+  #join-view,
+  #lobby-view,
+  #host-lobby,
+  #live-view,
+  #ended-view {
+    padding: 2rem 0.75rem 2.75rem;
+  }
+  .join-card {
+    padding: 1.55rem 1.1rem;
+  }
+  .meeting-actions button {
+    flex-basis: 100%;
+  }
+}
+
 body.is-student .preview-video-wrapper.viewer-mode::before {
   content: 'You will watch the host. No camera or microphone needed.';
   position: absolute;
@@ -725,7 +823,7 @@ body.is-student #join-btn {
 .meeting-header {
   position: absolute;
   top: 1.5rem;
-  left: 10%;
+  left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -951,6 +1049,45 @@ body.is-student #join-btn {
 .stage-overlay span {
   font-weight: 600;
   font-size: 1.05rem;
+}
+
+@media (max-width: 900px) {
+  .stage {
+    padding: 0 0 6rem;
+    align-items: stretch;
+  }
+  .stage-main {
+    border-radius: 28px;
+    min-height: clamp(320px, 52vh, 540px);
+  }
+}
+
+@media (max-width: 720px) {
+  .stage {
+    padding: 0 0 6.5rem;
+  }
+  .stage-main {
+    border-radius: 24px;
+  }
+  .stage-overlay {
+    padding: 1.25rem;
+  }
+  .stage-overlay span {
+    font-size: 0.95rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .stage {
+    padding: 0 0 7rem;
+  }
+  .stage-main {
+    min-height: clamp(260px, 58vh, 520px);
+    border-radius: 20px;
+  }
+  .stage-overlay {
+    padding: 1.1rem;
+  }
 }
 
 .stage-pip {
@@ -1379,9 +1516,9 @@ body.is-student .participant-strip {
 .meeting-controls {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
-  left: 28%;
+  left: 0%;
   transform: translateX(-50%);
-  width: min(720px, calc(100% - 2.5rem));
+  width:100%;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -2435,6 +2572,17 @@ utility-panel {
   .side-drawer {
     height: 100dvh;
   }
+  .chat-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+  }
+  .chat-overlay-panel {
+    width: 100%;
+    max-height: calc(100vh - 4.5rem);
+    border-radius: 24px 24px 0 0;
+    margin: 0;
+  }
 }
 
 @media (max-width: 560px) {
@@ -2470,6 +2618,10 @@ utility-panel {
   }
   .live-toast {
     width: calc(100% - 2.4rem);
+  }
+  .chat-overlay-panel {
+    max-height: calc(100vh - 3.25rem);
+    border-radius: 22px 22px 0 0;
   }
 }
 
@@ -3673,4 +3825,54 @@ body.dashboard-body {
 
 .auto-join-status.pending {
   color: #b91c1c;
+}
+
+footer.meeting-header-new.bottom {
+  position: absolute;
+  bottom: 1.5rem;     
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.85rem 1.75rem;
+  background: rgba(12, 14, 25, 0.55);
+  border-radius: 16px;
+  box-shadow: 0 24px 52px rgba(5, 6, 12, 0.45);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  z-index: 40;
+  width: auto;
+
+
+
+
+  border-radius: 28px;
+  background: rgba(12, 14, 25, 0.68);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 36px 72px rgba(5, 6, 15, 0.55);
+  backdrop-filter: blur(14px);
+}
+.meeting-controls {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    display: flex
+;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+    z-index: 80;
+}
+@media (max-width: 900px) {
+    .meeting-controls .control-bar {
+        gap: 0.6rem;
+        width: 100%;
+        left: 0%;
+        display: flex
+;
+        position: absolute;
+        margin-bottom: 85px;
+    }
 }

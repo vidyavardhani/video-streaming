@@ -116,6 +116,7 @@
     pollHistory: [],
     questions: [],
     recording: { isRecording: false, isPaused: false },
+    recordingUploadPending: false,
     raisedHands: new Map(),
     mediaStates: new Map(),
     handRaised: false,
@@ -203,6 +204,606 @@
   })();
 
   window.addEventListener('pointerdown', () => tonePlayer.warmup(), { once: true, passive: true });
+
+  const createRecordingManager = () => {
+    if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined') {
+      return {
+        isSupported: () => false,
+        isRecording: () => false,
+        isPaused: () => false,
+        start: async () => {
+          throw new Error('MediaRecorder is not supported in this browser');
+        },
+        stop: async () => null,
+        pause: async () => {},
+        resume: async () => {},
+        ensurePaused: async () => {},
+        ensureResumed: async () => {},
+        ensureStopped: async () => {}
+      };
+    }
+
+    let recorder = null;
+    let combinedStream = null;
+    let audioContext = null;
+    let audioDestination = null;
+    let audioSources = [];
+    let cleanupFns = [];
+    let chunks = [];
+    let stopPromise = null;
+    let stopResolver = null;
+    let stopRejecter = null;
+    let discardResult = false;
+    let startedAt = null;
+
+    const resetState = () => {
+      recorder = null;
+      combinedStream = null;
+      stopPromise = null;
+      stopResolver = null;
+      stopRejecter = null;
+      chunks = [];
+      discardResult = false;
+      startedAt = null;
+    };
+
+    const cleanup = () => {
+      cleanupFns.forEach((fn) => {
+        try {
+          fn?.();
+        } catch (error) {
+          /* ignore cleanup errors */
+        }
+      });
+      cleanupFns = [];
+      if (combinedStream) {
+        combinedStream.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch (error) {
+            /* ignore */
+          }
+        });
+      }
+      combinedStream = null;
+      audioSources.forEach(({ source, stream, stopOnCleanup }) => {
+        try {
+          source.disconnect();
+        } catch (error) {
+          /* ignore */
+        }
+        if (stopOnCleanup) {
+          stream.getTracks().forEach((track) => {
+            try {
+              track.stop();
+            } catch (error) {
+              /* ignore */
+            }
+          });
+        }
+      });
+      audioSources = [];
+      if (audioDestination) {
+        try {
+          audioDestination.disconnect();
+        } catch (error) {
+          /* ignore */
+        }
+      }
+      audioDestination = null;
+      if (audioContext) {
+        try {
+          audioContext.close();
+        } catch (error) {
+          /* ignore */
+        }
+      }
+      audioContext = null;
+    };
+
+    const pickMimeType = () => {
+      const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+      for (const type of candidates) {
+        try {
+          if (!type || MediaRecorder.isTypeSupported(type)) {
+            return type;
+          }
+        } catch (error) {
+          /* ignore */
+        }
+      }
+      return '';
+    };
+
+    const cloneTrack = (track) => {
+      if (!track) {
+        return { track: null, stopOnCleanup: false };
+      }
+      if (typeof track.clone === 'function') {
+        try {
+          const cloned = track.clone();
+          return { track: cloned, stopOnCleanup: true };
+        } catch (error) {
+          /* ignore clone failure */
+        }
+      }
+      return { track, stopOnCleanup: false };
+    };
+
+    const drawVideoIntoRect = (video, ctx, x, y, width, height) => {
+      const videoWidth = video?.videoWidth || 0;
+      const videoHeight = video?.videoHeight || 0;
+      if (!videoWidth || !videoHeight) return;
+      const videoRatio = videoWidth / videoHeight;
+      const rectRatio = width / height;
+      let drawWidth = width;
+      let drawHeight = height;
+      if (videoRatio > rectRatio) {
+        drawHeight = height;
+        drawWidth = height * videoRatio;
+      } else {
+        drawWidth = width;
+        drawHeight = width / videoRatio;
+      }
+      const offsetX = x + (width - drawWidth) / 2;
+      const offsetY = y + (height - drawHeight) / 2;
+      try {
+        ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+      } catch (error) {
+        /* ignore draw errors */
+      }
+    };
+
+    const drawVideoToCanvas = (video, ctx, width, height) => {
+      drawVideoIntoRect(video, ctx, 0, 0, width, height);
+    };
+
+    const createStageCanvasCapture = () => {
+      if (!elements.primaryVideo || typeof document === 'undefined') {
+        return null;
+      }
+      const canvas = document.createElement('canvas');
+      if (!canvas || typeof canvas.getContext !== 'function') {
+        return null;
+      }
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx = canvas.getContext('2d');
+      if (!ctx || typeof canvas.captureStream !== 'function') {
+        return null;
+      }
+
+      let rafId = null;
+      const drawFrame = () => {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (elements.primaryVideo?.readyState >= 2) {
+          drawVideoToCanvas(elements.primaryVideo, ctx, canvas.width, canvas.height);
+        }
+        const pipVisible = elements.pipContainer && !elements.pipContainer.classList.contains('hidden');
+        if (pipVisible && elements.pipVideo?.readyState >= 2) {
+          const pipWidth = Math.floor(canvas.width * 0.25);
+          const pipHeight = Math.floor(pipWidth * (9 / 16));
+          const padding = 24;
+          const pipX = canvas.width - pipWidth - padding;
+          const pipY = canvas.height - pipHeight - padding;
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.fillRect(pipX - 6, pipY - 6, pipWidth + 12, pipHeight + 12);
+          drawVideoIntoRect(elements.pipVideo, ctx, pipX, pipY, pipWidth, pipHeight);
+        }
+        rafId = window.requestAnimationFrame(drawFrame);
+      };
+
+      drawFrame();
+
+      const stream = canvas.captureStream(30);
+      const [track] = stream.getVideoTracks();
+      if (!track) {
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+        }
+        stream.getTracks().forEach((mediaTrack) => {
+          try {
+            mediaTrack.stop();
+          } catch (error) {
+            /* ignore */
+          }
+        });
+        return null;
+      }
+
+      const cleanupCapture = () => {
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+        }
+        stream.getTracks().forEach((mediaTrack) => {
+          try {
+            mediaTrack.stop();
+          } catch (error) {
+            /* ignore */
+          }
+        });
+      };
+
+      return { track, cleanup: cleanupCapture };
+    };
+
+    const captureElementTrack = (video) => {
+      if (!video) return null;
+      const capture = video.captureStream || video.mozCaptureStream;
+      if (typeof capture !== 'function') return null;
+      try {
+        const stream = capture.call(video, 30);
+        const [track] = stream.getVideoTracks();
+        if (!track) return null;
+        return {
+          track,
+          cleanup: () => {
+            stream.getTracks().forEach((mediaTrack) => {
+              try {
+                mediaTrack.stop();
+              } catch (error) {
+                /* ignore */
+              }
+            });
+          }
+        };
+      } catch (error) {
+        return null;
+      }
+    };
+
+    const createPlaceholderTrack = () => {
+      if (typeof document === 'undefined') {
+        return null;
+      }
+      const canvas = document.createElement('canvas');
+      if (!canvas || typeof canvas.getContext !== 'function' || typeof canvas.captureStream !== 'function') {
+        return null;
+      }
+      canvas.width = 640;
+      canvas.height = 360;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        return null;
+      }
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = '24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Recording unavailable', canvas.width / 2, canvas.height / 2);
+      const stream = canvas.captureStream(5);
+      const [track] = stream.getVideoTracks();
+      if (!track) {
+        stream.getTracks().forEach((mediaTrack) => {
+          try {
+            mediaTrack.stop();
+          } catch (error) {
+            /* ignore */
+          }
+        });
+        return null;
+      }
+      return {
+        track,
+        cleanup: () => {
+          stream.getTracks().forEach((mediaTrack) => {
+            try {
+              mediaTrack.stop();
+            } catch (error) {
+              /* ignore */
+            }
+          });
+        }
+      };
+    };
+
+    const pickFallbackVideoTrack = () => {
+      const candidates = [];
+      if (state.screenStream) candidates.push(state.screenStream);
+      if (state.localStream) candidates.push(state.localStream);
+      if (state.hostMedia?.camera) candidates.push(state.hostMedia.camera);
+      if (state.hostMedia?.screen) candidates.push(state.hostMedia.screen);
+      remoteStreamCache.forEach((stream) => {
+        if (stream) candidates.push(stream);
+      });
+      for (const stream of candidates) {
+        if (!stream || typeof stream.getVideoTracks !== 'function') continue;
+        const [track] = stream.getVideoTracks();
+        if (!track) continue;
+        const { track: cloned, stopOnCleanup } = cloneTrack(track);
+        if (!cloned) continue;
+        return {
+          track: cloned,
+          cleanup: () => {
+            if (stopOnCleanup) {
+              try {
+                cloned.stop();
+              } catch (error) {
+                /* ignore */
+              }
+            }
+          }
+        };
+      }
+      return null;
+    };
+
+    const buildVideoTrack = () => {
+      const stageCapture = createStageCanvasCapture();
+      if (stageCapture && stageCapture.track) {
+        return stageCapture;
+      }
+      const elementCapture = captureElementTrack(elements.primaryVideo);
+      if (elementCapture && elementCapture.track) {
+        return elementCapture;
+      }
+      const fallback = pickFallbackVideoTrack();
+      if (fallback && fallback.track) {
+        return fallback;
+      }
+      return createPlaceholderTrack();
+    };
+
+    const gatherAudioStreams = () => {
+      const streams = [];
+      if (state.localStream) streams.push(state.localStream);
+      if (state.screenStream) streams.push(state.screenStream);
+      if (state.hostMedia?.camera) streams.push(state.hostMedia.camera);
+      if (state.hostMedia?.screen) streams.push(state.hostMedia.screen);
+      remoteStreamCache.forEach((stream) => {
+        if (stream) streams.push(stream);
+      });
+      return streams;
+    };
+
+    const createAudioMix = async () => {
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (typeof AudioContextCtor !== 'function') {
+        return null;
+      }
+      const trackIds = new Set();
+      const sources = [];
+      const streams = gatherAudioStreams();
+      let context = null;
+      let destination = null;
+
+      streams.forEach((stream) => {
+        if (!stream || typeof stream.getAudioTracks !== 'function') return;
+        const tracks = stream.getAudioTracks();
+        tracks.forEach((track) => {
+          if (!track || track.readyState === 'ended') return;
+          if (trackIds.has(track.id)) return;
+          trackIds.add(track.id);
+          const { track: cloned, stopOnCleanup } = cloneTrack(track);
+          if (!cloned) return;
+          const sourceStream = new MediaStream([cloned]);
+          if (!context) {
+            context = new AudioContextCtor();
+            destination = context.createMediaStreamDestination();
+          }
+          if (!destination) return;
+          const sourceNode = context.createMediaStreamSource(sourceStream);
+          sourceNode.connect(destination);
+          sources.push({ source: sourceNode, stream: sourceStream, stopOnCleanup });
+        });
+      });
+
+      if (!context || !destination || sources.length === 0) {
+        sources.forEach(({ stream, stopOnCleanup }) => {
+          stream.getTracks().forEach((track) => {
+            if (stopOnCleanup && typeof track.stop === 'function') {
+              track.stop();
+            }
+          });
+        });
+        if (context) {
+          try {
+            context.close();
+          } catch (error) {
+            /* ignore */
+          }
+        }
+        return null;
+      }
+
+      try {
+        if (context.state === 'suspended') {
+          await context.resume().catch(() => {});
+        }
+      } catch (error) {
+        /* ignore resume issues */
+      }
+
+      return { context, destination, sources };
+    };
+
+    const buildCombinedStream = async () => {
+      const stream = new MediaStream();
+      const video = buildVideoTrack();
+      if (video?.track) {
+        stream.addTrack(video.track);
+        if (typeof video.cleanup === 'function') {
+          cleanupFns.push(video.cleanup);
+        }
+      }
+
+      const audio = await createAudioMix();
+      if (audio?.destination) {
+        audioDestination = audio.destination;
+        audioContext = audio.context;
+        audioSources = audio.sources;
+        audio.destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
+      }
+
+      if (!stream.getVideoTracks().length) {
+        const placeholder = createPlaceholderTrack();
+        if (placeholder?.track) {
+          stream.addTrack(placeholder.track);
+          if (typeof placeholder.cleanup === 'function') {
+            cleanupFns.push(placeholder.cleanup);
+          }
+        }
+      }
+
+      return stream;
+    };
+
+    const start = async () => {
+      if (recorder && recorder.state !== 'inactive') {
+        return;
+      }
+      const stream = await buildCombinedStream();
+      if (!stream) {
+        throw new Error('Unable to access media streams for recording');
+      }
+      combinedStream = stream;
+      const mimeType = pickMimeType();
+      try {
+        recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      } catch (error) {
+        cleanup();
+        resetState();
+        throw error;
+      }
+      chunks = [];
+      discardResult = false;
+      startedAt = Date.now();
+
+      recorder.ondataavailable = (event) => {
+        if (event?.data && event.data.size) {
+          chunks.push(event.data);
+        }
+      };
+
+      recorder.onerror = (event) => {
+        const error = event?.error || new Error('Recording failed');
+        cleanup();
+        if (stopRejecter) {
+          stopRejecter(error);
+        }
+        resetState();
+      };
+
+      recorder.onstop = () => {
+        const recordedChunks = chunks.slice();
+        const fallbackType = recorder?.mimeType || recordedChunks[0]?.type || mimeType || 'video/webm';
+        const duration = startedAt ? Date.now() - startedAt : null;
+        cleanup();
+        let payload = null;
+        if (!discardResult && recordedChunks.length) {
+          try {
+            const blob = new Blob(recordedChunks, { type: fallbackType });
+            if (blob.size > 0) {
+              payload = {
+                blob,
+                mimeType: blob.type || fallbackType,
+                size: blob.size,
+                durationMs: duration
+              };
+            }
+          } catch (error) {
+            /* ignore blob construction errors */
+          }
+        }
+        if (discardResult) {
+          payload = null;
+        }
+        if (stopResolver) {
+          stopResolver(payload);
+        }
+        resetState();
+      };
+
+      try {
+        recorder.start(1000);
+      } catch (error) {
+        cleanup();
+        resetState();
+        throw error;
+      }
+    };
+
+    const stop = ({ discard = false } = {}) => {
+      if (!recorder || recorder.state === 'inactive') {
+        return Promise.resolve(null);
+      }
+      discardResult = discard;
+      if (stopPromise) {
+        return stopPromise;
+      }
+      stopPromise = new Promise((resolve, reject) => {
+        stopResolver = resolve;
+        stopRejecter = reject;
+      });
+      try {
+        recorder.stop();
+      } catch (error) {
+        cleanup();
+        if (stopRejecter) {
+          stopRejecter(error);
+        }
+        resetState();
+        return Promise.reject(error);
+      }
+      return stopPromise;
+    };
+
+    const pause = async () => {
+      if (!recorder || recorder.state !== 'recording') return;
+      try {
+        recorder.pause();
+      } catch (error) {
+        /* ignore pause failure */
+      }
+    };
+
+    const resume = async () => {
+      if (!recorder || recorder.state !== 'paused') return;
+      try {
+        recorder.resume();
+      } catch (error) {
+        /* ignore resume failure */
+      }
+    };
+
+    const isRecording = () => !!recorder && recorder.state !== 'inactive';
+    const isPaused = () => !!recorder && recorder.state === 'paused';
+
+    const ensurePaused = async () => {
+      if (isRecording() && !isPaused()) {
+        await pause();
+      }
+    };
+
+    const ensureResumed = async () => {
+      if (isPaused()) {
+        await resume();
+      }
+    };
+
+    const ensureStopped = async () => {
+      if (isRecording()) {
+        await stop({ discard: true }).catch(() => {});
+      }
+    };
+
+    return {
+      isSupported: () => true,
+      start,
+      stop,
+      pause,
+      resume,
+      isRecording,
+      isPaused,
+      ensurePaused,
+      ensureResumed,
+      ensureStopped
+    };
+  };
+
+  const recordingManager = createRecordingManager();
 
   const hostTrackRegistry = new WeakSet();
   const remoteTrackGuards = new WeakMap();
@@ -580,7 +1181,7 @@
     copyCode: document.getElementById('copy-code'),
     shareInfo: document.getElementById('share-info'),
     emailInvite: document.getElementById('email-invite'),
-    meetingShell: document.querySelector('.meeting-shell'),
+
     meetingControls: document.querySelector('.meeting-controls'),
     meetingParticipantCount: document.getElementById('meeting-participant-count'),
     meetingMicStatus: document.getElementById('meeting-mic-status'),
@@ -694,6 +1295,23 @@
     modalSecondary: document.getElementById('modal-secondary'),
     stage: document.querySelector('.stage')
   };
+
+  if (elements.layoutLandscape) {
+    elements.layoutLandscape.classList.add('hidden');
+    elements.layoutLandscape.setAttribute('aria-hidden', 'true');
+    elements.layoutLandscape.setAttribute('aria-pressed', 'true');
+  }
+  if (elements.layoutPortrait) {
+    elements.layoutPortrait.classList.add('hidden');
+    elements.layoutPortrait.setAttribute('aria-hidden', 'true');
+    elements.layoutPortrait.setAttribute('aria-pressed', 'false');
+  }
+  if (elements.quickOrientation) {
+    elements.quickOrientation.classList.add('hidden');
+    elements.quickOrientation.setAttribute('aria-hidden', 'true');
+    elements.quickOrientation.setAttribute('aria-pressed', 'false');
+    elements.quickOrientation.setAttribute('tabindex', '-1');
+  }
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -2892,10 +3510,63 @@
     }
   };
 
+  const determineFileExtensionFromMime = (mimeType = '') => {
+    if (!mimeType || typeof mimeType !== 'string') return 'webm';
+    const normalized = mimeType.split(';')[0].trim().toLowerCase();
+    const mapping = {
+      'video/mp4': 'mp4',
+      'video/webm': 'webm',
+      'video/quicktime': 'mov',
+      'video/x-matroska': 'mkv',
+      'video/ogg': 'ogg'
+    };
+    if (mapping[normalized]) {
+      return mapping[normalized];
+    }
+    const [, fallback] = normalized.split('/');
+    return fallback || 'webm';
+  };
+
+  const buildRecordingFileName = (mimeType) => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const extension = determineFileExtensionFromMime(mimeType);
+    return `class-${classCode}-recording-${timestamp}.${extension}`;
+  };
+
+  const promptLocalDownload = (blob, mimeType) => {
+    if (!blob || !blob.size) return null;
+    const fileName = buildRecordingFileName(mimeType || blob.type || 'video/webm');
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    }, 0);
+    return fileName;
+  };
+
+  const syncRecordingManager = (recordingState) => {
+    if (!state.isHost || !recordingManager.isSupported()) return;
+    if (!recordingState?.isRecording) {
+      recordingManager.ensureStopped().catch(() => {});
+      return;
+    }
+    if (recordingState.isPaused) {
+      recordingManager.ensurePaused().catch(() => {});
+    } else {
+      recordingManager.ensureResumed().catch(() => {});
+    }
+  };
+
   const updateRecordingStatus = () => {
     if (!elements.recordingStatus) return;
     const isRecording = !!state.recording?.isRecording;
     const isPaused = !!state.recording?.isPaused;
+    const pending = !!state.recordingUploadPending;
     let statusText = 'Recording inactive';
     if (isRecording) {
       statusText = isPaused ? 'Recording paused' : 'Recording in progress…';
@@ -2905,9 +3576,11 @@
     elements.recordingStatus.classList.toggle('paused', isPaused);
     if (elements.recordingStart) {
       elements.recordingStart.classList.toggle('hidden', !state.isHost || isRecording);
+      elements.recordingStart.disabled = pending || !state.isHost || isRecording;
     }
     if (elements.recordingStop) {
       elements.recordingStop.classList.toggle('hidden', !state.isHost || !isRecording);
+      elements.recordingStop.disabled = pending || !state.isHost || !isRecording;
     }
     if (elements.recordingPause) {
       elements.recordingPause.classList.toggle('hidden', !state.isHost || !isRecording);
@@ -2915,6 +3588,7 @@
       elements.recordingPause.classList.toggle('is-active', isPaused);
       elements.recordingPause.setAttribute('aria-pressed', isPaused.toString());
       elements.recordingPause.setAttribute('aria-label', isPaused ? 'Resume recording' : 'Pause recording');
+      elements.recordingPause.disabled = pending || !state.isHost || !isRecording;
     }
     if (elements.quickRecord) {
       const nextLabel = isRecording ? 'Stop' : 'Record';
@@ -2927,6 +3601,8 @@
       elements.quickRecord.setAttribute('aria-pressed', isRecording.toString());
       elements.quickRecord.setAttribute('aria-label', `${isRecording ? 'Stop' : 'Start'} recording`);
       elements.quickRecord.setAttribute('aria-hidden', (!state.isHost).toString());
+      elements.quickRecord.disabled = pending || !state.isHost;
+      elements.quickRecord.setAttribute('aria-disabled', (pending || !state.isHost).toString());
     }
     if (elements.recordingLink) {
       const link = state.classInfo?.recordingClassLink || state.classInfo?.recordedVideoLink;
@@ -2955,12 +3631,27 @@
       state.classInfo.recordingClassLink = payload.recordingClassLink;
     }
     updateRecordingStatus();
+    syncRecordingManager(state.recording);
   };
 
-  const performRecordingAction = async (action) => {
+  const performRecordingAction = async (action, { body = null, headers: customHeaders = {} } = {}) => {
     if (!state.isHost) return null;
     try {
-      const res = await fetch(`/classes/${classCode}/recording/${action}`, { method: 'POST' });
+      const options = { method: 'POST' };
+      if (body instanceof FormData) {
+        options.body = body;
+        if (customHeaders && Object.keys(customHeaders).length) {
+          options.headers = customHeaders;
+        }
+      } else if (body) {
+        const payload = typeof body === 'string' ? body : JSON.stringify(body);
+        options.body = payload;
+        options.headers = { 'Content-Type': 'application/json', ...customHeaders };
+      } else {
+        options.body = JSON.stringify({});
+        options.headers = { 'Content-Type': 'application/json', ...customHeaders };
+      }
+      const res = await fetch(`/classes/${classCode}/recording/${action}`, options);
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         throw new Error(error.message || `Unable to ${action} recording`);
@@ -2977,6 +3668,97 @@
       throw error;
     } finally {
       registerOverlayInteraction({ autoHide: true });
+    }
+  };
+
+  const startRecordingSession = async () => {
+    if (!state.isHost || state.recording?.isRecording || state.recordingUploadPending) return;
+    if (!recordingManager.isSupported()) {
+      alert('Recording is not supported in this browser. Please try a different device or browser.');
+      return;
+    }
+    state.recordingUploadPending = true;
+    updateRecordingStatus();
+    let serverAttempted = false;
+    try {
+      await recordingManager.start();
+      serverAttempted = true;
+      await performRecordingAction('start');
+    } catch (error) {
+      console.error('startRecordingSession error', error);
+      if (serverAttempted) {
+        await recordingManager.stop({ discard: true }).catch(() => {});
+      } else {
+        alert(error.message || 'Unable to start recording');
+      }
+    } finally {
+      state.recordingUploadPending = false;
+      updateRecordingStatus();
+    }
+  };
+
+  const toggleRecordingPause = async () => {
+    if (!state.isHost || !state.recording?.isRecording || state.recordingUploadPending) return;
+    const action = state.recording.isPaused ? 'resume' : 'pause';
+    state.recordingUploadPending = true;
+    updateRecordingStatus();
+    try {
+      await performRecordingAction(action);
+    } catch (error) {
+      console.error('toggleRecordingPause error', error);
+    } finally {
+      state.recordingUploadPending = false;
+      updateRecordingStatus();
+    }
+  };
+
+  const stopRecordingSession = async () => {
+    if (!state.isHost || !state.recording?.isRecording || state.recordingUploadPending) return;
+    state.recordingUploadPending = true;
+    updateRecordingStatus();
+    let recordingResult = null;
+    if (recordingManager.isSupported()) {
+      try {
+        recordingResult = await recordingManager.stop();
+      } catch (error) {
+        console.error('Unable to stop local recorder', error);
+        alert(error.message || 'Unable to finalize recording');
+      }
+    }
+    try {
+      const formData = new FormData();
+      if (recordingResult?.blob && recordingResult.blob.size) {
+        const mime = recordingResult.mimeType || recordingResult.blob.type || 'video/webm';
+        const fileName = buildRecordingFileName(mime);
+        formData.append('recording', recordingResult.blob, fileName);
+        formData.append('mimeType', mime);
+        if (recordingResult.durationMs) {
+          formData.append('durationMs', String(recordingResult.durationMs));
+        }
+        formData.append('size', String(recordingResult.blob.size));
+      }
+      await performRecordingAction('stop', { body: formData });
+    } catch (error) {
+      console.error('stopRecordingSession error', error);
+      if (recordingResult?.blob) {
+        const fileName = promptLocalDownload(
+          recordingResult.blob,
+          recordingResult.mimeType || recordingResult.blob.type || 'video/webm'
+        );
+        alert(
+          `Recording upload failed. ${fileName ? `${fileName} ` : ''}has been downloaded to your device instead.`
+        );
+      } else {
+        alert(error.message || 'Unable to stop recording');
+      }
+      try {
+        await performRecordingAction('stop', { body: new FormData() });
+      } catch (secondaryError) {
+        console.error('Secondary stop attempt failed', secondaryError);
+      }
+    } finally {
+      state.recordingUploadPending = false;
+      updateRecordingStatus();
     }
   };
 
@@ -3501,32 +4283,57 @@
     ensureOverlayControlsVisible({ autoHide });
   };
 
-  const setLayout = (layout) => {
-    const next = layout === 'portrait' ? 'portrait' : 'landscape';
-    state.layout = next;
-    if (elements.meetingShell) {
-      elements.meetingShell.classList.remove('layout-landscape', 'layout-portrait');
-      elements.meetingShell.classList.add(`layout-${next}`);
+  const computeViewportLayout = () => {
+    if (typeof window === 'undefined') {
+      return 'landscape';
     }
-    const isPortrait = next === 'portrait';
+    const docEl = typeof document !== 'undefined' ? document.documentElement : null;
+    const width = window.innerWidth || docEl?.clientWidth || 0;
+    const height = window.innerHeight || docEl?.clientHeight || 0;
+    if (!width) {
+      return 'landscape';
+    }
+    if (width <= 960) {
+      return 'portrait';
+    }
+    if (height > width && width <= 1280) {
+      return 'portrait';
+    }
+    return 'landscape';
+  };
+
+  const applyMeetingShellLayout = (layout) => {
+    if (!elements.meetingShell) return;
+    elements.meetingShell.classList.toggle('layout-portrait', layout === 'portrait');
+    elements.meetingShell.classList.toggle('layout-landscape', layout !== 'portrait');
+  };
+
+  const syncViewportLayout = ({ force = false } = {}) => {
+    const desired = computeViewportLayout();
+    if (!force && state.layout === desired) {
+      return desired;
+    }
+    state.layout = desired;
+    applyMeetingShellLayout(desired);
+    return desired;
+  };
+
+  const setLayout = () => {
+    const activeLayout = syncViewportLayout({ force: true });
     if (elements.layoutLandscape) {
-      elements.layoutLandscape.setAttribute('aria-pressed', (!isPortrait).toString());
-      elements.layoutLandscape.classList.toggle('is-active', !isPortrait);
+      elements.layoutLandscape.classList.toggle('is-active', activeLayout === 'landscape');
+      elements.layoutLandscape.setAttribute('aria-pressed', activeLayout === 'landscape' ? 'true' : 'false');
     }
     if (elements.layoutPortrait) {
-      elements.layoutPortrait.setAttribute('aria-pressed', isPortrait.toString());
-      elements.layoutPortrait.classList.toggle('is-active', isPortrait);
+      elements.layoutPortrait.classList.toggle('is-active', activeLayout === 'portrait');
+      elements.layoutPortrait.setAttribute('aria-pressed', activeLayout === 'portrait' ? 'true' : 'false');
     }
     if (elements.quickOrientation) {
-      const targetLayout = isPortrait ? 'landscape' : 'portrait';
       const label = elements.quickOrientation.querySelector('.label');
       if (label) {
-        label.textContent = targetLayout.charAt(0).toUpperCase() + targetLayout.slice(1);
+        label.textContent = activeLayout === 'portrait' ? 'Portrait' : 'Landscape';
       }
-      elements.quickOrientation.dataset.target = targetLayout;
-      elements.quickOrientation.setAttribute('aria-pressed', isPortrait.toString());
-      elements.quickOrientation.setAttribute('aria-label', `Switch to ${targetLayout} layout`);
-      elements.quickOrientation.classList.toggle('is-active', isPortrait);
+      delete elements.quickOrientation.dataset.target;
     }
   };
 
@@ -4906,6 +5713,8 @@
     state.mediaStates.set('host', { audio: false, video: false });
     hostMediaSync?.refreshExpectation?.();
     state.previewReady = false;
+    state.recordingUploadPending = false;
+    recordingManager.ensureStopped().catch(() => {});
   };
 
   const createPeerConnection = (targetToken, initiator = false) => {
@@ -5583,25 +6392,27 @@
 
   elements.recordingStart?.addEventListener('click', () => {
     if (!state.isHost) return;
-    performRecordingAction('start').catch(() => {});
+    startRecordingSession().catch(() => {});
   });
 
   elements.recordingPause?.addEventListener('click', () => {
     if (!state.isHost || !state.recording?.isRecording) return;
-    const action = state.recording.isPaused ? 'resume' : 'pause';
-    performRecordingAction(action).catch(() => {});
+    toggleRecordingPause().catch(() => {});
   });
 
   elements.recordingStop?.addEventListener('click', () => {
     if (!state.isHost) return;
-    performRecordingAction('stop').catch(() => {});
+    stopRecordingSession().catch(() => {});
   });
 
   elements.quickRecord?.addEventListener('click', () => {
-    if (!state.isHost) return;
+    if (!state.isHost || state.recordingUploadPending) return;
     registerOverlayInteraction({ autoHide: true });
-    const action = state.recording?.isRecording ? 'stop' : 'start';
-    performRecordingAction(action).catch(() => {});
+    if (state.recording?.isRecording) {
+      stopRecordingSession().catch(() => {});
+    } else {
+      startRecordingSession().catch(() => {});
+    }
   });
 
   elements.quickCamera?.addEventListener('click', async () => {
@@ -5609,11 +6420,11 @@
     await switchCameraSource();
   });
 
-  elements.quickOrientation?.addEventListener('click', () => {
-    const targetLayout = elements.quickOrientation?.dataset?.target || (state.layout === 'portrait' ? 'landscape' : 'portrait');
-    setLayout(targetLayout);
-    registerOverlayInteraction({ autoHide: true });
-  });
+  if (elements.quickOrientation && !elements.quickOrientation.classList.contains('hidden')) {
+    elements.quickOrientation.addEventListener('click', () => {
+      registerOverlayInteraction({ autoHide: true });
+    });
+  }
 
   elements.quickChat?.addEventListener('click', () => {
     if (state.activeDrawer === 'chat') {
@@ -5675,6 +6486,7 @@
       closeMoreMenu();
     }
     closeCameraMenu();
+    syncViewportLayout();
   });
 
   elements.chatForm?.addEventListener('submit', async (event) => {
@@ -6474,14 +7286,16 @@
   elements.participantsToggle?.addEventListener('click', () => toggleDrawer('participants'));
   elements.chatClose?.addEventListener('click', () => closeDrawer());
   elements.participantsClose?.addEventListener('click', () => closeDrawer());
-  elements.layoutLandscape?.addEventListener('click', () => {
-    setLayout('landscape');
-    registerOverlayInteraction({ autoHide: true });
-  });
-  elements.layoutPortrait?.addEventListener('click', () => {
-    setLayout('portrait');
-    registerOverlayInteraction({ autoHide: true });
-  });
+  if (elements.layoutLandscape && !elements.layoutLandscape.classList.contains('hidden')) {
+    elements.layoutLandscape.addEventListener('click', () => {
+      registerOverlayInteraction({ autoHide: true });
+    });
+  }
+  if (elements.layoutPortrait && !elements.layoutPortrait.classList.contains('hidden')) {
+    elements.layoutPortrait.addEventListener('click', () => {
+      registerOverlayInteraction({ autoHide: true });
+    });
+  }
   elements.drawerBackdrop?.addEventListener('click', () => closeDrawer());
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -6507,24 +7321,7 @@
   const init = async () => {
     hideRejoinPrompt();
     initializeComponents();
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      try {
-        const orientationMedia = window.matchMedia('(orientation: portrait)');
-        state.layout = orientationMedia.matches ? 'portrait' : 'landscape';
-        const handleOrientationChange = (event) => {
-          setLayout(event.matches ? 'portrait' : 'landscape');
-          registerOverlayInteraction({ autoHide: true });
-        };
-        if (typeof orientationMedia.addEventListener === 'function') {
-          orientationMedia.addEventListener('change', handleOrientationChange);
-        } else if (typeof orientationMedia.addListener === 'function') {
-          orientationMedia.addListener(handleOrientationChange);
-        }
-      } catch (error) {
-        /* ignore orientation detection issues */
-      }
-    }
-    setLayout(state.layout);
+    setLayout();
     ensureOverlayControlsVisible({ autoHide: false });
     await loadClass();
     await loadUser();

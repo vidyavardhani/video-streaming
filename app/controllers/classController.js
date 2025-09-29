@@ -223,7 +223,7 @@ exports.end = async (req, res) => {
     klass.hostMediaState = { audio: false, video: false };
 
     if (klass.recording?.isRecording) {
-      await recordingService.stopRecording(klass);
+      await recordingService.stopRecording(klass, { allowPlaceholder: true });
     }
     await klass.save();
 
