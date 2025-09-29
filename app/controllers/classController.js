@@ -12,7 +12,7 @@ const { upsertAutoJoinEntry, syncAutoJoinees } = require('../utils/autoJoin');
 const { resolveHostAccess, ensureHostToken } = require('../utils/hostAccess');
 const recordingService = require('../services/recordingService');
 const { postSystemMessage } = require('../services/chatService');
-https://stream.kalp.ltd
+
 const baseUrl = () => process.env.BASE_URL || 'http://localhost:4000';
 
 const generateMeetingCode = () => {
