@@ -4283,22 +4283,55 @@
     ensureOverlayControlsVisible({ autoHide });
   };
 
-  const setLayout = () => {
-    state.layout = 'landscape';
-    if (elements.meetingShell) {
-      elements.meetingShell.classList.remove('layout-portrait');
-      elements.meetingShell.classList.add('layout-landscape');
+  const computeViewportLayout = () => {
+    if (typeof window === 'undefined') {
+      return 'landscape';
     }
+    const docEl = typeof document !== 'undefined' ? document.documentElement : null;
+    const width = window.innerWidth || docEl?.clientWidth || 0;
+    const height = window.innerHeight || docEl?.clientHeight || 0;
+    if (!width) {
+      return 'landscape';
+    }
+    if (width <= 960) {
+      return 'portrait';
+    }
+    if (height > width && width <= 1280) {
+      return 'portrait';
+    }
+    return 'landscape';
+  };
+
+  const applyMeetingShellLayout = (layout) => {
+    if (!elements.meetingShell) return;
+    elements.meetingShell.classList.toggle('layout-portrait', layout === 'portrait');
+    elements.meetingShell.classList.toggle('layout-landscape', layout !== 'portrait');
+  };
+
+  const syncViewportLayout = ({ force = false } = {}) => {
+    const desired = computeViewportLayout();
+    if (!force && state.layout === desired) {
+      return desired;
+    }
+    state.layout = desired;
+    applyMeetingShellLayout(desired);
+    return desired;
+  };
+
+  const setLayout = () => {
+    const activeLayout = syncViewportLayout({ force: true });
     if (elements.layoutLandscape) {
-      elements.layoutLandscape.classList.add('is-active');
+      elements.layoutLandscape.classList.toggle('is-active', activeLayout === 'landscape');
+      elements.layoutLandscape.setAttribute('aria-pressed', activeLayout === 'landscape' ? 'true' : 'false');
     }
     if (elements.layoutPortrait) {
-      elements.layoutPortrait.classList.remove('is-active');
+      elements.layoutPortrait.classList.toggle('is-active', activeLayout === 'portrait');
+      elements.layoutPortrait.setAttribute('aria-pressed', activeLayout === 'portrait' ? 'true' : 'false');
     }
     if (elements.quickOrientation) {
       const label = elements.quickOrientation.querySelector('.label');
       if (label) {
-        label.textContent = 'Landscape';
+        label.textContent = activeLayout === 'portrait' ? 'Portrait' : 'Landscape';
       }
       delete elements.quickOrientation.dataset.target;
     }
@@ -6453,6 +6486,7 @@
       closeMoreMenu();
     }
     closeCameraMenu();
+    syncViewportLayout();
   });
 
   elements.chatForm?.addEventListener('submit', async (event) => {
@@ -7287,7 +7321,6 @@
   const init = async () => {
     hideRejoinPrompt();
     initializeComponents();
-    state.layout = 'landscape';
     setLayout();
     ensureOverlayControlsVisible({ autoHide: false });
     await loadClass();
