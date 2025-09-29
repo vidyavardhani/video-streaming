@@ -52,6 +52,18 @@ const uploadToS3 = async (key, filePath) => {
   return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 };
 
+const ensureDirectory = async (dirPath) => {
+  await fsp.mkdir(dirPath, { recursive: true });
+};
+
+const saveLocalRecording = async (key, sourcePath) => {
+  const normalizedKey = key.replace(/\\/g, '/');
+  const destinationPath = path.join(__dirname, '../public', normalizedKey);
+  await ensureDirectory(path.dirname(destinationPath));
+  await fsp.copyFile(sourcePath, destinationPath);
+  return `/public/${normalizedKey}`;
+};
+
 const stopProcess = (proc) => new Promise((resolve) => {
   if (!proc) {
     resolve();
@@ -114,7 +126,13 @@ const stopRecording = async (klass) => {
   await ensureFileExists(recording.outputPath);
 
   const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.mp4`;
-  const link = await uploadToS3(fileKey, recording.outputPath);
+  let s3Link = null;
+  try {
+    s3Link = await uploadToS3(fileKey, recording.outputPath);
+  } catch (error) {
+    console.error('Recording upload failed, falling back to local storage', error);
+  }
+  const finalLink = s3Link || (await saveLocalRecording(fileKey, recording.outputPath));
   await fsp.unlink(recording.outputPath).catch(() => {});
   activeRecordings.delete(classKey);
 
@@ -125,8 +143,6 @@ const stopRecording = async (klass) => {
     pausedAt: null,
     fileKey
   };
-  const fallbackLink = `s3://${bucket || 'bucket'}/${fileKey}`;
-  const finalLink = link || fallbackLink;
   klass.recordedVideoLink = finalLink;
   klass.recordingClassLink = finalLink;
   return finalLink;

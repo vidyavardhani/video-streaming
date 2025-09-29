@@ -695,6 +695,23 @@
     stage: document.querySelector('.stage')
   };
 
+  if (elements.layoutLandscape) {
+    elements.layoutLandscape.classList.add('hidden');
+    elements.layoutLandscape.setAttribute('aria-hidden', 'true');
+    elements.layoutLandscape.setAttribute('aria-pressed', 'true');
+  }
+  if (elements.layoutPortrait) {
+    elements.layoutPortrait.classList.add('hidden');
+    elements.layoutPortrait.setAttribute('aria-hidden', 'true');
+    elements.layoutPortrait.setAttribute('aria-pressed', 'false');
+  }
+  if (elements.quickOrientation) {
+    elements.quickOrientation.classList.add('hidden');
+    elements.quickOrientation.setAttribute('aria-hidden', 'true');
+    elements.quickOrientation.setAttribute('aria-pressed', 'false');
+    elements.quickOrientation.setAttribute('tabindex', '-1');
+  }
+
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
   class ToneManager {
@@ -3501,32 +3518,24 @@
     ensureOverlayControlsVisible({ autoHide });
   };
 
-  const setLayout = (layout) => {
-    const next = layout === 'portrait' ? 'portrait' : 'landscape';
-    state.layout = next;
+  const setLayout = () => {
+    state.layout = 'landscape';
     if (elements.meetingShell) {
-      elements.meetingShell.classList.remove('layout-landscape', 'layout-portrait');
-      elements.meetingShell.classList.add(`layout-${next}`);
+      elements.meetingShell.classList.remove('layout-portrait');
+      elements.meetingShell.classList.add('layout-landscape');
     }
-    const isPortrait = next === 'portrait';
     if (elements.layoutLandscape) {
-      elements.layoutLandscape.setAttribute('aria-pressed', (!isPortrait).toString());
-      elements.layoutLandscape.classList.toggle('is-active', !isPortrait);
+      elements.layoutLandscape.classList.add('is-active');
     }
     if (elements.layoutPortrait) {
-      elements.layoutPortrait.setAttribute('aria-pressed', isPortrait.toString());
-      elements.layoutPortrait.classList.toggle('is-active', isPortrait);
+      elements.layoutPortrait.classList.remove('is-active');
     }
     if (elements.quickOrientation) {
-      const targetLayout = isPortrait ? 'landscape' : 'portrait';
       const label = elements.quickOrientation.querySelector('.label');
       if (label) {
-        label.textContent = targetLayout.charAt(0).toUpperCase() + targetLayout.slice(1);
+        label.textContent = 'Landscape';
       }
-      elements.quickOrientation.dataset.target = targetLayout;
-      elements.quickOrientation.setAttribute('aria-pressed', isPortrait.toString());
-      elements.quickOrientation.setAttribute('aria-label', `Switch to ${targetLayout} layout`);
-      elements.quickOrientation.classList.toggle('is-active', isPortrait);
+      delete elements.quickOrientation.dataset.target;
     }
   };
 
@@ -5609,11 +5618,11 @@
     await switchCameraSource();
   });
 
-  elements.quickOrientation?.addEventListener('click', () => {
-    const targetLayout = elements.quickOrientation?.dataset?.target || (state.layout === 'portrait' ? 'landscape' : 'portrait');
-    setLayout(targetLayout);
-    registerOverlayInteraction({ autoHide: true });
-  });
+  if (elements.quickOrientation && !elements.quickOrientation.classList.contains('hidden')) {
+    elements.quickOrientation.addEventListener('click', () => {
+      registerOverlayInteraction({ autoHide: true });
+    });
+  }
 
   elements.quickChat?.addEventListener('click', () => {
     if (state.activeDrawer === 'chat') {
@@ -6474,14 +6483,16 @@
   elements.participantsToggle?.addEventListener('click', () => toggleDrawer('participants'));
   elements.chatClose?.addEventListener('click', () => closeDrawer());
   elements.participantsClose?.addEventListener('click', () => closeDrawer());
-  elements.layoutLandscape?.addEventListener('click', () => {
-    setLayout('landscape');
-    registerOverlayInteraction({ autoHide: true });
-  });
-  elements.layoutPortrait?.addEventListener('click', () => {
-    setLayout('portrait');
-    registerOverlayInteraction({ autoHide: true });
-  });
+  if (elements.layoutLandscape && !elements.layoutLandscape.classList.contains('hidden')) {
+    elements.layoutLandscape.addEventListener('click', () => {
+      registerOverlayInteraction({ autoHide: true });
+    });
+  }
+  if (elements.layoutPortrait && !elements.layoutPortrait.classList.contains('hidden')) {
+    elements.layoutPortrait.addEventListener('click', () => {
+      registerOverlayInteraction({ autoHide: true });
+    });
+  }
   elements.drawerBackdrop?.addEventListener('click', () => closeDrawer());
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -6507,24 +6518,8 @@
   const init = async () => {
     hideRejoinPrompt();
     initializeComponents();
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      try {
-        const orientationMedia = window.matchMedia('(orientation: portrait)');
-        state.layout = orientationMedia.matches ? 'portrait' : 'landscape';
-        const handleOrientationChange = (event) => {
-          setLayout(event.matches ? 'portrait' : 'landscape');
-          registerOverlayInteraction({ autoHide: true });
-        };
-        if (typeof orientationMedia.addEventListener === 'function') {
-          orientationMedia.addEventListener('change', handleOrientationChange);
-        } else if (typeof orientationMedia.addListener === 'function') {
-          orientationMedia.addListener(handleOrientationChange);
-        }
-      } catch (error) {
-        /* ignore orientation detection issues */
-      }
-    }
-    setLayout(state.layout);
+    state.layout = 'landscape';
+    setLayout();
     ensureOverlayControlsVisible({ autoHide: false });
     await loadClass();
     await loadUser();
