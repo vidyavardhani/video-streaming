@@ -725,7 +725,7 @@ body.is-student #join-btn {
 .meeting-header {
   position: absolute;
   top: 1.5rem;
-  left: 50%;
+  left: 10%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -737,7 +737,7 @@ body.is-student #join-btn {
   backdrop-filter: blur(24px);
   border: 1px solid rgba(148, 163, 184, 0.22);
   z-index: 40;
-  width: min(960px, calc(100% - 3rem));
+  width: auto;
 }
 
 .meeting-stats {
@@ -1379,7 +1379,7 @@ body.is-student .participant-strip {
 .meeting-controls {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
-  left: 25%;
+  left: 28%;
   transform: translateX(-50%);
   width: min(720px, calc(100% - 2.5rem));
   display: flex;
@@ -1396,7 +1396,7 @@ body.is-student .participant-strip {
   justify-content: center;
   flex-wrap: wrap;
   gap: 0.9rem;
-  width: 100%;
+  width: auto;
   padding: 0.75rem 1.85rem;
   border-radius: 28px;
   background: rgba(12, 14, 25, 0.68);
