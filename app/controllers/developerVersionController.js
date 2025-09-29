@@ -22,12 +22,17 @@ const generateMeetingCode = async () => {
   return uuid();
 };
 
+const meetingLinkFor = (klass) =>
+  klass.meetingLink && klass.meetingLink.includes('?token=')
+    ? klass.meetingLink
+    : `${baseUrl()}/class/${klass.meetingCode}?token=${klass.meetingCode}`;
+
 const toClassPayload = (klass) => ({
   classId: klass._id.toString(),
   classCode: klass.meetingCode,
   title: klass.title,
   status: klass.status,
-  meetingLink: klass.meetingLink || `${baseUrl()}/class/${klass.meetingCode}`,
+  meetingLink: meetingLinkFor(klass),
   autoJoineeIds: Array.isArray(klass.autoJoineeIds) ? klass.autoJoineeIds : [],
   autoJoinRoster: (klass.autoJoinRoster || []).map((entry) => ({
     studentId: entry.studentId,
@@ -131,7 +136,7 @@ exports.createClass = async (req, res) => {
     const klass = await ClassModel.create({
       title: title.trim(),
       meetingCode,
-      meetingLink: `${baseUrl()}/class/${meetingCode}`,
+      meetingLink: `${baseUrl()}/class/${meetingCode}?token=${meetingCode}`,
       host: host._id,
       developerKey: developerKey._id,
       hostKey: hostKey ? hostKey._id : undefined

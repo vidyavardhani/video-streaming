@@ -215,6 +215,10 @@ const classSchema = new mongoose.Schema({
     default: 'scheduled'
   },
   meetingLink: String,
+  hostAccessToken: {
+    type: String,
+    default: uuid
+  },
   meetingCode: {
     type: String,
     unique: true,

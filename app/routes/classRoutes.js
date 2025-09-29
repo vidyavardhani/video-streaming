@@ -13,14 +13,14 @@ const upload = multer({
 const router = express.Router();
 
 router.post('/', auth.authenticate, [body('title').trim().notEmpty()], classController.create);
-router.patch('/:code/start', auth.authenticate, classController.start);
-router.patch('/:code/end', auth.authenticate, classController.end);
+router.patch('/:code/start', auth.optional, classController.start);
+router.patch('/:code/end', auth.optional, classController.end);
 router.post('/:code/join', auth.optional, classController.join);
-router.post('/:code/admit', auth.authenticate, classController.admit);
-router.post('/:code/remove', auth.authenticate, classController.remove);
+router.post('/:code/admit', auth.optional, classController.admit);
+router.post('/:code/remove', auth.optional, classController.remove);
 router.post(
   '/:code/polls',
-  auth.authenticate,
+  auth.optional,
   [
     body('question').trim().notEmpty(),
     body('options').isArray({ min: 2 })
@@ -33,7 +33,7 @@ router.post(
   [body('optionId').notEmpty()],
   engagementController.votePoll
 );
-router.post('/:code/polls/close', auth.authenticate, engagementController.closePoll);
+router.post('/:code/polls/close', auth.optional, engagementController.closePoll);
 router.post(
   '/:code/questions',
   auth.optional,
@@ -42,17 +42,17 @@ router.post(
 );
 router.patch(
   '/:code/questions/:questionId',
-  auth.authenticate,
+  auth.optional,
   [body('answer').trim().notEmpty()],
   engagementController.answerQuestion
 );
-router.post('/:code/whiteboard/clear', auth.authenticate, engagementController.clearWhiteboard);
-router.post('/:code/recording/start', auth.authenticate, engagementController.startRecording);
-router.post('/:code/recording/pause', auth.authenticate, engagementController.pauseRecording);
-router.post('/:code/recording/resume', auth.authenticate, engagementController.resumeRecording);
+router.post('/:code/whiteboard/clear', auth.optional, engagementController.clearWhiteboard);
+router.post('/:code/recording/start', auth.optional, engagementController.startRecording);
+router.post('/:code/recording/pause', auth.optional, engagementController.pauseRecording);
+router.post('/:code/recording/resume', auth.optional, engagementController.resumeRecording);
 router.post(
   '/:code/recording/stop',
-  auth.authenticate,
+  auth.optional,
   upload.single('recording'),
   engagementController.stopRecording
 );

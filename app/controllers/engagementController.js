@@ -4,16 +4,14 @@ const ClassModel = require('../models/Class');
 const { getIO } = require('../sockets/manager');
 const { ensureWhiteboard } = require('../utils/classState');
 const recordingService = require('../services/recordingService');
+const { resolveHostAccess } = require('../utils/hostAccess');
 
 const findClassByCode = async (code) => {
   if (!code) return null;
   return ClassModel.findOne({ meetingCode: code });
 };
 
-const ensureHost = (klass, user) => {
-  if (!klass || !user) return false;
-  return klass.host.toString() === user._id.toString();
-};
+const ensureHost = (klass, req) => resolveHostAccess(klass, { user: req.user, request: req });
 
 const locateParticipant = (klass, user, joinToken) => {
   if (!klass) return null;
@@ -46,7 +44,8 @@ exports.createPoll = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can create polls' });
     }
     if (klass.activePoll && !klass.activePoll.closedAt) {
@@ -139,7 +138,8 @@ exports.closePoll = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can close poll' });
     }
     if (!klass.activePoll || klass.activePoll.closedAt) {
@@ -210,7 +210,8 @@ exports.answerQuestion = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can answer questions' });
     }
 
@@ -238,7 +239,8 @@ exports.clearWhiteboard = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can clear whiteboard' });
     }
 
@@ -261,7 +263,8 @@ exports.startRecording = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can start recording' });
     }
     if (klass.recording?.isRecording) {
@@ -289,7 +292,8 @@ exports.pauseRecording = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can pause recording' });
     }
     if (!klass.recording?.isRecording) {
@@ -320,7 +324,8 @@ exports.resumeRecording = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can resume recording' });
     }
     if (!klass.recording?.isRecording) {
@@ -351,7 +356,8 @@ exports.stopRecording = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (!ensureHost(klass, req.user)) {
+    const hostContext = ensureHost(klass, req);
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can stop recording' });
     }
     if (!klass.recording?.isRecording) {

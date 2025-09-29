@@ -12,6 +12,7 @@ const {
   endParticipantSession
 } = require('../utils/classState');
 const { postSystemMessage } = require('../services/chatService');
+const { resolveHostAccess } = require('../utils/hostAccess');
 
 const directChatStore = new Map();
 const chatStoreHydrated = new Set();
@@ -89,7 +90,15 @@ module.exports = (io) => {
 
     socket.on('session:join', async (payload, callback = () => {}) => {
       try {
-        const { classCode: providedCode, classId, token, joinToken, displayName, studentId } = payload || {};
+        const {
+          classCode: providedCode,
+          classId,
+          token,
+          joinToken,
+          displayName,
+          studentId,
+          hostToken
+        } = payload || {};
         const classCode = providedCode || classId;
         if (!classCode) {
           callback({ error: 'classCode missing' });
@@ -111,7 +120,20 @@ module.exports = (io) => {
         let participant = null;
         const normalizedStudentId = studentId ? String(studentId) : null;
 
-        if (user && klass.host.toString() === user._id.toString()) {
+        const providedHostToken =
+          typeof hostToken === 'string' && hostToken.trim().length
+            ? hostToken.trim()
+            : null;
+        const hostContext = resolveHostAccess(klass, {
+          user,
+          token: providedHostToken
+        });
+
+        if (hostContext.tokenGenerated) {
+          await klass.save();
+        }
+
+        if (hostContext.isHost) {
           role = 'host';
           participantToken = 'host';
         } else if (user) {

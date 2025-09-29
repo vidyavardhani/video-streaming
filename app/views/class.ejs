@@ -10,7 +10,14 @@
   <link rel="stylesheet" href="/public/css/style.css">
 </head>
 <body>
-  <div id="class-app" data-class-code="<%= classCode %>">
+  <div
+    id="class-app"
+    data-class-code="<%= classCode %>"
+    data-role="<%= roleHint || '' %>"
+    data-host-token="<%= hostToken || '' %>"
+    data-prefill-name="<%= prefillName || '' %>"
+    data-code-token="<%= codeToken || '' %>"
+  >
     <section id="join-view">
       <div class="join-layout">
         <div class="join-card">
