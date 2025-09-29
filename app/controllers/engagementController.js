@@ -358,7 +358,23 @@ exports.stopRecording = async (req, res) => {
       return res.status(400).json({ message: 'Recording not active' });
     }
 
-    const link = await recordingService.stopRecording(klass);
+    const uploadedFile = req.file || null;
+    const mimeType = uploadedFile?.mimetype || req.body?.mimeType || null;
+    const durationMs = req.body?.durationMs;
+
+    if (!uploadedFile) {
+      console.warn('Recording stop received without file payload', {
+        meetingCode: klass.meetingCode,
+        classId: klass._id.toString()
+      });
+    }
+
+    const link = await recordingService.stopRecording(klass, {
+      buffer: uploadedFile?.buffer || null,
+      mimeType,
+      durationMs,
+      allowPlaceholder: !uploadedFile
+    });
     await klass.save();
 
     getIO().to(klass.meetingCode).emit('recording:status', {
@@ -373,6 +389,6 @@ exports.stopRecording = async (req, res) => {
     });
   } catch (error) {
     console.error('stopRecording error', error);
-    return res.status(500).json({ message: 'Unable to stop recording' });
+    return res.status(500).json({ message: error.message || 'Unable to stop recording' });
   }
 };
