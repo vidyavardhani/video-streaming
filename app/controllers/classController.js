@@ -240,6 +240,47 @@ exports.start = async (req, res) => {
   }
 };
 
+
+
+exports.startMobile = async (req, res) => {
+  try {
+    const klass = await findClassByCode(req.params.code);
+    if (!klass) return res.status(404).json({ message: 'Class not found' });
+
+   
+    const hostToken = req.query.hostToken;
+    if (!hostToken || hostToken !== klass.hostAccessToken) {
+      return res.status(403).json({ message: 'Only host can start class' });
+    }
+
+    if (klass.status === 'ended') {
+      return res.status(400).json({ message: 'Class already ended' });
+    }
+
+    ensureChatRoom(klass);
+    ensureWhiteboard(klass);
+    ensureMeetingLink(klass);
+
+    klass.status = 'live';
+    klass.startTime = new Date();
+
+    const autoJoined = syncAutoJoinees(klass, { live: true });
+    klass.markModified('autoJoinRoster');
+    klass.markModified('participants');
+    klass.markModified('autoJoineeIds');
+    await klass.save();
+    await klass.populate('host');
+
+    const io = getIO();
+    io.to(klass.meetingCode).emit('class:started', { classCode: klass.meetingCode });
+
+    return res.json({ message: 'Class started', class: publicClassShape(klass, { includeHostAccess: true }) });
+  } catch (err) {
+    console.error('Start class error', err);
+    return res.status(500).json({ message: 'Unable to start class' });
+  }
+};
+
 exports.end = async (req, res) => {
   try {
     const klass = await findClassByCode(req.params.code);
@@ -667,5 +708,32 @@ exports.mine = async (req, res) => {
   } catch (error) {
     console.error('My classes error', error);
     return res.status(500).json({ message: 'Unable to load classes' });
+  }
+};
+
+exports.getOne = async (req, res) => {
+  try {
+    const klass = await ClassModel.findOne({ meetingCode: req.params.code }).populate('host');
+    if (!klass) return res.status(404).json({ message: 'Class not found' });
+
+    const hostToken = req.query.hostToken;
+    const isHost = hostToken && hostToken === klass.hostAccessToken;
+
+    // Auto-start if host link is opened
+    if (isHost && klass.status !== 'ended' && klass.status !== 'live') {
+      ensureChatRoom(klass);
+      ensureWhiteboard(klass);
+      ensureMeetingLink(klass);
+      klass.status = 'live';
+      klass.startTime = new Date();
+      await klass.save();
+
+      getIO().to(klass.meetingCode).emit('class:started', { classCode: klass.meetingCode });
+    }
+
+    return res.json(publicClassShape(klass, { includeHostAccess: isHost }));
+  } catch (err) {
+    console.error("Get class error", err);
+    return res.status(500).json({ message: "Unable to fetch class" });
   }
 };
