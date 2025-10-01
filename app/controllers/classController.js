@@ -9,6 +9,7 @@ const {
   endParticipantSession
 } = require('../utils/classState');
 const { upsertAutoJoinEntry, syncAutoJoinees } = require('../utils/autoJoin');
+const { resolveHostAccess, ensureHostToken } = require('../utils/hostAccess');
 const recordingService = require('../services/recordingService');
 const { postSystemMessage } = require('../services/chatService');
 
@@ -17,6 +18,16 @@ const baseUrl = () => process.env.BASE_URL || 'http://localhost:4000';
 const generateMeetingCode = () => {
   const digits = Math.floor(100000000 + Math.random() * 900000000).toString();
   return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+};
+
+const ensureMeetingLink = (klass) => {
+  if (!klass) return false;
+  const desired = `${baseUrl()}/class/${klass.meetingCode}?token=${klass.meetingCode}`;
+  if (!klass.meetingLink || !klass.meetingLink.includes('?token=')) {
+    klass.meetingLink = desired;
+    return true;
+  }
+  return false;
 };
 
 const createUniqueMeetingCode = async () => {
@@ -45,8 +56,9 @@ const getHostId = (klass) => {
   return klass.host.toString();
 };
 
-const publicClassShape = (klass) => {
+const publicClassShape = (klass, options = {}) => {
   if (!klass) return null;
+  const { includeHostAccess = false } = options;
   const lobbyEntries = Array.isArray(klass.lobby) ? klass.lobby : [];
   const participantEntries = Array.isArray(klass.participants) ? klass.participants : [];
   const activeParticipants = participantEntries.filter((entry) => !entry.expelledAt);
@@ -59,12 +71,16 @@ const publicClassShape = (klass) => {
         email: hostRef.email || undefined
       }
     : null;
-  return {
+  const classUrl = `${baseUrl()}/class/${klass.meetingCode}`;
+  const meetingLink = klass.meetingLink && klass.meetingLink.includes('?token=')
+    ? klass.meetingLink
+    : `${classUrl}?token=${klass.meetingCode}`;
+  const shape = {
     id: klass.meetingCode,
     code: klass.meetingCode,
     title: klass.title,
     status: klass.status,
-    meetingLink: klass.meetingLink || `${baseUrl()}/class/${klass.meetingCode}`,
+    meetingLink,
     meetingCode: klass.meetingCode,
     chatRoomId: klass.chatRoomId,
     host: hostDetails,
@@ -109,8 +125,20 @@ const publicClassShape = (klass) => {
       displayName: entry.displayName,
       joinToken: entry.joinToken,
       lastJoinedAt: entry.lastJoinedAt
-    }))
+    })),
+    studentJoinLink: meetingLink,
+    studentJoinLinkTemplate: `${classUrl}?name=`
   };
+
+  if (includeHostAccess) {
+    const { token: hostToken } = ensureHostToken(klass);
+    shape.hostStartLink = hostToken
+      ? `${classUrl}?type=host&hostToken=${hostToken}&token=${klass.meetingCode}`
+      : null;
+    shape.hostAccessToken = hostToken || null;
+  }
+
+  return shape;
 };
 
 exports.create = async (req, res) => {
@@ -125,20 +153,29 @@ exports.create = async (req, res) => {
 
   try {
     const meetingCode = await createUniqueMeetingCode();
+    const hostAccessToken = uuid();
+    const meetingLink = `${baseUrl()}/class/${meetingCode}?token=${meetingCode}`;
+    const hostStartLink = `${baseUrl()}/class/${meetingCode}?type=host&hostToken=${hostAccessToken}&token=${meetingCode}`;
+    const studentJoinTemplate = `${baseUrl()}/class/${meetingCode}?name=`;
     const klass = await ClassModel.create({
       title: req.body.title,
       host: req.user._id,
-      meetingCode
+      meetingCode,
+      hostAccessToken,
+      meetingLink
     });
-    klass.meetingLink = `${baseUrl()}/class/${meetingCode}`;
     ensureChatRoom(klass);
     ensureWhiteboard(klass);
     await klass.save();
     await klass.populate('host');
     return res.status(201).json({
       classCode: klass.meetingCode,
-      meetingLink: klass.meetingLink,
-      meetingCode: klass.meetingCode
+      meetingLink,
+      meetingCode: klass.meetingCode,
+      hostToken: hostAccessToken,
+      hostStartLink,
+      studentJoinLink: meetingLink,
+      studentJoinLinkTemplate: studentJoinTemplate
     });
   } catch (error) {
     console.error('Create class error', error);
@@ -152,7 +189,8 @@ exports.start = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (getHostId(klass) !== req.user._id.toString()) {
+    const hostContext = resolveHostAccess(klass, { user: req.user, request: req });
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can start class' });
     }
     if (klass.status === 'ended') {
@@ -161,6 +199,7 @@ exports.start = async (req, res) => {
 
     ensureChatRoom(klass);
     ensureWhiteboard(klass);
+    ensureMeetingLink(klass);
     klass.status = 'live';
     klass.startTime = new Date();
     const autoJoined = syncAutoJoinees(klass, { live: true });
@@ -168,6 +207,7 @@ exports.start = async (req, res) => {
     klass.markModified('participants');
     klass.markModified('autoJoineeIds');
     await klass.save();
+    await klass.populate('host');
 
     const io = getIO();
     io.to(klass.meetingCode).emit('class:started', {
@@ -190,7 +230,10 @@ exports.start = async (req, res) => {
       });
     });
 
-    return res.json({ message: 'Class started', class: publicClassShape(await klass.populate('host')) });
+    return res.json({
+      message: 'Class started',
+      class: publicClassShape(klass, { includeHostAccess: hostContext.isHost })
+    });
   } catch (error) {
     console.error('Start class error', error);
     return res.status(500).json({ message: 'Unable to start class' });
@@ -203,13 +246,15 @@ exports.end = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (getHostId(klass) !== req.user._id.toString()) {
+    const hostContext = resolveHostAccess(klass, { user: req.user, request: req });
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can end class' });
     }
     if (klass.status === 'ended') {
       return res.status(400).json({ message: 'Class already ended' });
     }
 
+    ensureMeetingLink(klass);
     klass.status = 'ended';
     klass.endTime = new Date();
     klass.lobby = [];
@@ -256,12 +301,17 @@ exports.join = async (req, res) => {
       return res.status(400).json({ message: 'Class has ended' });
     }
 
-    const displayName = req.body.displayName?.trim();
+    const displayNameSource =
+      req.body.displayName ?? req.query.displayName ?? req.query.name ?? '';
+    const displayName =
+      typeof displayNameSource === 'string' ? displayNameSource.trim() : '';
     if (!displayName) {
       return res.status(400).json({ message: 'Display name is required' });
     }
 
-    const studentId = req.body.studentId ? String(req.body.studentId) : null;
+    const studentIdRaw =
+      req.body.studentId ?? req.query.studentId ?? req.body.student_id ?? req.query.student_id;
+    const studentId = studentIdRaw ? String(studentIdRaw) : null;
     if (studentId) {
       const rosterEntry = upsertAutoJoinEntry(klass, { studentId, displayName });
       const live = klass.status === 'live';
@@ -289,7 +339,10 @@ exports.join = async (req, res) => {
 
     const providedToken = req.body.joinToken?.trim()
       || req.body.inviteToken?.trim()
-      || req.body.token?.trim();
+      || req.body.token?.trim()
+      || req.query.joinToken?.trim()
+      || req.query.inviteToken?.trim()
+      || req.query.token?.trim();
 
     const autoAdmitByToken = providedToken
       ? klass.participants.find((entry) => entry.token === providedToken)
@@ -439,7 +492,7 @@ exports.join = async (req, res) => {
 };
 
 exports.admit = async (req, res) => {
-  const { joinToken } = req.body;
+  const joinToken = req.body.joinToken || req.query.joinToken;
   if (!joinToken) {
     return res.status(400).json({ message: 'joinToken is required' });
   }
@@ -449,7 +502,8 @@ exports.admit = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (getHostId(klass) !== req.user._id.toString()) {
+    const hostContext = resolveHostAccess(klass, { user: req.user, request: req });
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can admit students' });
     }
 
@@ -506,7 +560,7 @@ exports.admit = async (req, res) => {
 };
 
 exports.remove = async (req, res) => {
-  const { joinToken } = req.body;
+  const joinToken = req.body.joinToken || req.query.joinToken;
   if (!joinToken) {
     return res.status(400).json({ message: 'joinToken is required' });
   }
@@ -516,7 +570,8 @@ exports.remove = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
-    if (getHostId(klass) !== req.user._id.toString()) {
+    const hostContext = resolveHostAccess(klass, { user: req.user, request: req });
+    if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can remove students' });
     }
 
@@ -569,8 +624,14 @@ exports.getOne = async (req, res) => {
     if (!klass) {
       return res.status(404).json({ message: 'Class not found' });
     }
+    const hostContext = resolveHostAccess(klass, { user: req.user, request: req });
+    const linkUpdated = ensureMeetingLink(klass);
+    if (hostContext.tokenGenerated || linkUpdated) {
+      await klass.save();
+      await klass.populate('host');
+    }
 
-    return res.json(publicClassShape(klass));
+    return res.json(publicClassShape(klass, { includeHostAccess: hostContext.isHost }));
   } catch (error) {
     console.error('Get class error', error);
     return res.status(500).json({ message: 'Unable to fetch class' });
@@ -593,7 +654,16 @@ exports.mine = async (req, res) => {
   }
   try {
     const classes = await ClassModel.find({ host: req.user._id }).sort({ createdAt: -1 }).populate('host');
-    return res.json(classes.map(publicClassShape));
+    const shaped = [];
+    for (const klass of classes) {
+      const hostContext = resolveHostAccess(klass, { user: req.user });
+      const linkUpdated = ensureMeetingLink(klass);
+      if (hostContext.tokenGenerated || linkUpdated) {
+        await klass.save();
+      }
+      shaped.push(publicClassShape(klass, { includeHostAccess: true }));
+    }
+    return res.json(shaped);
   } catch (error) {
     console.error('My classes error', error);
     return res.status(500).json({ message: 'Unable to load classes' });

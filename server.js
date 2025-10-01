@@ -8,6 +8,7 @@ const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const docs = require('./docs/swagger');
+const mobileDocs = require('./docs/mobile');
 const { spawn } = require('child_process');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 
@@ -57,6 +58,9 @@ app.use('/chat', chatRoutes);
 app.use('/admin', dashboardRoutes);
 app.use('/api', apiRoutes);
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(docs));
+app.get('/doc', (req, res) => {
+  res.json(mobileDocs);
+});
 
 app.get('/', optional, (req, res) => {
   if (req.user) {
@@ -82,7 +86,22 @@ app.get('/class/:code/end', (req, res) => {
 });
 
 app.get('/class/:code', (req, res) => {
-  res.render('class', { classCode: req.params.code });
+  const roleHint = typeof req.query.type === 'string' ? req.query.type : req.query.role;
+  const hostToken = typeof req.query.hostToken === 'string' ? req.query.hostToken : '';
+  const prefillName =
+    typeof req.query.name === 'string'
+      ? req.query.name
+      : typeof req.query.displayName === 'string'
+        ? req.query.displayName
+        : '';
+  const codeToken = typeof req.query.token === 'string' ? req.query.token : '';
+  res.render('class', {
+    classCode: req.params.code,
+    roleHint: roleHint || '',
+    hostToken,
+    prefillName,
+    codeToken
+  });
 });
 
 const PORT = process.env.PORT || 4000;

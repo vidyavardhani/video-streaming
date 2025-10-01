@@ -3,9 +3,12 @@
   if (!root) return;
 
   const classCode = root.dataset.classCode;
+  const hostTokenFromDataset = (root.dataset.hostToken || '').trim();
+  const prefillNameFromDataset = root.dataset.prefillName || '';
   const tokenKey = 'vs_token';
   const joinKey = `vs_join_${classCode}`;
   const displayNameKey = `vs_name_${classCode}`;
+  const hostTokenKey = `vs_host_${classCode}`;
 
   const safeStorage = (type) => {
     try {
@@ -45,6 +48,12 @@
     } catch (error) {
       /* ignore storage errors */
     }
+  };
+
+  const getStoredHostToken = () => storageGet(storage.local, hostTokenKey) || '';
+  const persistHostToken = (token) => {
+    if (!token) return;
+    storageSet(storage.local, hostTokenKey, token);
   };
 
   const getStoredJoinToken = () =>
@@ -92,6 +101,8 @@
     user: null,
     joinToken: getStoredJoinToken(),
     savedDisplayName: getStoredDisplayName(),
+    hostToken: '',
+    prefillName: prefillNameFromDataset,
     isHost: false,
     admitted: false,
     localStream: null,
@@ -147,10 +158,32 @@
     activeDirectChat: null,
     layout: 'landscape',
     controlsVisible: true,
-    controlsTimer: null
+    controlsTimer: null,
+    controlsHideDelay: 1200
   };
 
   state.mediaStates.set('host', { audio: false, video: false });
+
+  const initialHostToken = hostTokenFromDataset || getStoredHostToken();
+  if (hostTokenFromDataset) {
+    persistHostToken(hostTokenFromDataset);
+  }
+  if (initialHostToken) {
+    state.hostToken = initialHostToken;
+  }
+
+  const applyHostAuth = (options = {}) => {
+    if (!state.hostToken) {
+      return { ...(options || {}) };
+    }
+    const baseOptions = options || {};
+    const merged = { ...baseOptions };
+    merged.headers = {
+      ...(baseOptions.headers || {}),
+      'X-Class-Host-Token': state.hostToken
+    };
+    return merged;
+  };
 
   const tonePlayer = (() => {
     let context = null;
@@ -1182,6 +1215,7 @@
     shareInfo: document.getElementById('share-info'),
     emailInvite: document.getElementById('email-invite'),
 
+    meetingShell: document.querySelector('.meeting-shell'),
     meetingControls: document.querySelector('.meeting-controls'),
     meetingParticipantCount: document.getElementById('meeting-participant-count'),
     meetingMicStatus: document.getElementById('meeting-mic-status'),
@@ -1295,6 +1329,10 @@
     modalSecondary: document.getElementById('modal-secondary'),
     stage: document.querySelector('.stage')
   };
+
+  if (elements.nameInput && prefillNameFromDataset && !elements.nameInput.value) {
+    elements.nameInput.value = prefillNameFromDataset;
+  }
 
   if (elements.layoutLandscape) {
     elements.layoutLandscape.classList.add('hidden');
@@ -3651,7 +3689,7 @@
         options.body = JSON.stringify({});
         options.headers = { 'Content-Type': 'application/json', ...customHeaders };
       }
-      const res = await fetch(`/classes/${classCode}/recording/${action}`, options);
+      const res = await fetch(`/classes/${classCode}/recording/${action}`, applyHostAuth(options));
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         throw new Error(error.message || `Unable to ${action} recording`);
@@ -3905,11 +3943,11 @@
 
   const submitPollVote = async (optionId) => {
     try {
-      const res = await fetch(`/classes/${classCode}/polls/vote`, {
+      const res = await fetch(`/classes/${classCode}/polls/vote`, applyHostAuth({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ optionId, joinToken: state.joinToken })
-      });
+      }));
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         alert(error.message || 'Unable to submit vote');
@@ -3922,11 +3960,14 @@
   const promptAnswer = (question) => {
     const answer = window.prompt('Answer question', question.answer || '');
     if (!answer) return;
-    fetch(`/classes/${classCode}/questions/${question.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answer })
-    });
+    fetch(
+      `/classes/${classCode}/questions/${question.id}`,
+      applyHostAuth({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer })
+      })
+    );
   };
 
   const allowParticipant = (token) => {
@@ -4272,15 +4313,33 @@
       state.controlsTimer = null;
     }
     if (autoHide && !state.activeDrawer) {
-      state.controlsTimer = window.setTimeout(() => {
-        state.controlsTimer = null;
-        hideOverlayControls();
-      }, 1000);
+      const delay = typeof state.controlsHideDelay === 'number' ? state.controlsHideDelay : 1000;
+      if (delay > 0) {
+        state.controlsTimer = window.setTimeout(() => {
+          state.controlsTimer = null;
+          hideOverlayControls();
+        }, delay);
+      }
     }
   };
 
   const registerOverlayInteraction = ({ autoHide = true } = {}) => {
     ensureOverlayControlsVisible({ autoHide });
+  };
+
+  const applyRoleStyling = () => {
+    document.body.classList.toggle('is-host', !!state.isHost);
+    document.body.classList.toggle('is-student', !state.isHost);
+    if (elements.meetingShell) {
+      elements.meetingShell.classList.toggle('viewer-autohide', !state.isHost);
+    }
+    if (state.isHost) {
+      state.controlsHideDelay = 0;
+      ensureOverlayControlsVisible({ autoHide: false });
+    } else {
+      state.controlsHideDelay = isMobileDevice() ? 2200 : 1800;
+      ensureOverlayControlsVisible({ autoHide: true });
+    }
   };
 
   const computeViewportLayout = () => {
@@ -5051,9 +5110,13 @@
   };
 
   const loadClass = async () => {
-    const res = await fetch(`/classes/${classCode}`);
+    const res = await fetch(`/classes/${classCode}`, applyHostAuth());
     if (!res.ok) throw new Error('Failed to load class');
     state.classInfo = await res.json();
+    if (!state.hostToken && state.classInfo.hostAccessToken) {
+      state.hostToken = state.classInfo.hostAccessToken;
+      persistHostToken(state.hostToken);
+    }
     state.whiteboard.strokes = (state.classInfo.whiteboard?.strokes || []).map((stroke) => ({
       ...stroke,
       path: Array.isArray(stroke.path) ? stroke.path : []
@@ -5109,7 +5172,8 @@
           classCode,
           token: getStoredToken(),
           joinToken: state.joinToken,
-          displayName: elements.nameInput?.value || state.user?.name
+          displayName: elements.nameInput?.value || state.user?.name,
+          hostToken: state.hostToken || undefined
         },
         (response) => {
           if (response?.error) {
@@ -5126,6 +5190,7 @@
           hideRejoinPrompt();
           clearReconnectTimer();
           state.isHost = response.role === 'host';
+          applyRoleStyling();
           permissionManager?.configureRole(state.isHost);
           participantManager?.setIsHost(state.isHost);
           controlCenter?.setHost(state.isHost);
@@ -5987,21 +6052,27 @@
   };
 
   const admit = async (token) => {
-    await fetch(`/classes/${classCode}/admit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ joinToken: token })
-    });
+    await fetch(
+      `/classes/${classCode}/admit`,
+      applyHostAuth({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ joinToken: token })
+      })
+    );
 
     notifyAutoJoinUpdate();
   };
 
   const removeParticipant = async (token) => {
-    await fetch(`/classes/${classCode}/remove`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ joinToken: token })
-    });
+    await fetch(
+      `/classes/${classCode}/remove`,
+      applyHostAuth({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ joinToken: token })
+      })
+    );
   };
 
   const refreshLobby = () => {
@@ -6030,11 +6101,14 @@
       elements.nameInput.value = state.savedDisplayName;
     }
     try {
-      const res = await fetch(`/classes/${classCode}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName: state.savedDisplayName })
-      });
+      const res = await fetch(
+        `/classes/${classCode}/join`,
+        applyHostAuth({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName: state.savedDisplayName })
+        })
+      );
       if (!res.ok) {
         throw new Error('Auto join failed');
       }
@@ -6174,11 +6248,14 @@
     }
     persistDisplayName(displayName);
     state.savedDisplayName = displayName;
-    const res = await fetch(`/classes/${classCode}/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName })
-    });
+    const res = await fetch(
+      `/classes/${classCode}/join`,
+      applyHostAuth({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName })
+      })
+    );
     if (!res.ok) {
       const error = await res.json().catch(() => ({}));
       alert(error.message || 'Unable to join');
@@ -6193,7 +6270,7 @@
   });
 
   elements.startButton?.addEventListener('click', async () => {
-    const res = await fetch(`/classes/${classCode}/start`, { method: 'PATCH' });
+    const res = await fetch(`/classes/${classCode}/start`, applyHostAuth({ method: 'PATCH' }));
     if (!res.ok) {
       alert('Unable to start class');
       return;
@@ -6210,7 +6287,7 @@
       confirmText: 'End for all'
     });
     if (!confirmed) return;
-    await fetch(`/classes/${classCode}/end`, { method: 'PATCH' });
+    await fetch(`/classes/${classCode}/end`, applyHostAuth({ method: 'PATCH' }));
     leaveSession();
     setView('endedView');
     clearJoinToken();
@@ -6357,11 +6434,14 @@
       alert('Provide a question and at least two options');
       return;
     }
-    const res = await fetch(`/classes/${classCode}/polls`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, options })
-    });
+    const res = await fetch(
+      `/classes/${classCode}/polls`,
+      applyHostAuth({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, options })
+      })
+    );
     if (!res.ok) {
       const error = await res.json().catch(() => ({}));
       alert(error.message || 'Unable to create poll');
@@ -6373,18 +6453,21 @@
 
   elements.pollClose?.addEventListener('click', async () => {
     if (!state.isHost) return;
-    await fetch(`/classes/${classCode}/polls/close`, { method: 'POST' });
+    await fetch(`/classes/${classCode}/polls/close`, applyHostAuth({ method: 'POST' }));
   });
 
   elements.qnaForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const question = elements.qnaInput.value.trim();
     if (!question) return;
-    const res = await fetch(`/classes/${classCode}/questions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, joinToken: state.joinToken })
-    });
+    const res = await fetch(
+      `/classes/${classCode}/questions`,
+      applyHostAuth({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, joinToken: state.joinToken })
+      })
+    );
     if (res.ok) {
       elements.qnaInput.value = '';
     }
@@ -7325,15 +7408,16 @@
     ensureOverlayControlsVisible({ autoHide: false });
     await loadClass();
     await loadUser();
-    state.isHost = state.user && state.classInfo.host && state.user.id === state.classInfo.host.id;
+    state.isHost =
+      (state.user && state.classInfo.host && state.user.id === state.classInfo.host.id)
+      || !!state.hostToken;
     permissionManager?.configureRole(state.isHost);
     participantManager?.setIsHost(state.isHost);
     controlCenter?.setHost(state.isHost);
     chatManager?.attachToneManager(toneManager);
     syncDrawerState();
     setStageZoom(1);
-    document.body.classList.toggle('is-host', !!state.isHost);
-    document.body.classList.toggle('is-student', !state.isHost);
+    applyRoleStyling();
     if (!state.isHost && elements.participantStrip) {
       elements.participantStrip.classList.add('hidden');
     } else if (state.isHost && elements.participantStrip) {
@@ -7385,7 +7469,9 @@
         scheduleReconnect();
       }
     } else if (state.isHost) {
-      elements.nameInput.value = state.user.name;
+      if (elements.nameInput) {
+        elements.nameInput.value = state.user?.name || elements.nameInput.value || '';
+      }
       setView(state.classInfo.status === 'live' ? 'liveView' : 'hostLobbyView');
       connectSocket();
       renderLobby();

@@ -783,24 +783,16 @@ body.is-student #join-btn {
 }
 
 .meeting-shell.layout-portrait .meeting-controls .control-bar {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.75rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .meeting-shell.layout-portrait .control-dock {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.meeting-shell.layout-portrait .control-btn {
-  width: 100%;
-  height: 52px;
-}
-
-.meeting-shell.layout-portrait .control-btn .icon svg {
-  width: 20px;
-  height: 20px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
 }
 
 .meeting-shell.layout-portrait .meeting-controls {
@@ -824,7 +816,7 @@ body.is-student #join-btn {
   position: absolute;
   top: 1.5rem;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, 0);
   display: flex;
   align-items: center;
   gap: 1.25rem;
@@ -836,6 +828,16 @@ body.is-student #join-btn {
   border: 1px solid rgba(148, 163, 184, 0.22);
   z-index: 40;
   width: auto;
+}
+
+.meeting-shell.viewer-autohide .meeting-header {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.meeting-shell.viewer-autohide.controls-hidden .meeting-header {
+  opacity: 0;
+  transform: translate(-50%, -18px);
+  pointer-events: none;
 }
 
 .meeting-stats {
