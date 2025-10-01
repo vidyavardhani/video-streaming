@@ -5194,6 +5194,7 @@
           permissionManager?.configureRole(state.isHost);
           participantManager?.setIsHost(state.isHost);
           controlCenter?.setHost(state.isHost);
+          updateRecordingStatus();
           state.skipRejoinFlag = false;
           if (elements.hostControls) {
             elements.hostControls.classList.toggle('hidden', !state.isHost);
