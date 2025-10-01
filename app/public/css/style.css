@@ -3878,3 +3878,7 @@ footer.meeting-header-new.bottom {
         margin-bottom: 85px;
     }
 }
+footer.meeting-controls
+ {
+    left: 0;
+}
