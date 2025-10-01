@@ -3882,3 +3882,7 @@ footer.meeting-controls
  {
     left: 0;
 }
+
+header.meeting-header {
+    display: none;
+}
