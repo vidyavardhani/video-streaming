@@ -8,7 +8,7 @@ const TOKEN_COOKIE = 'vs_token';
 const signToken = (user) => {
   const payload = { id: user._id, role: user.role };
   const secret = process.env.JWT_SECRET || 'super-secret-key';
-  return jwt.sign(payload, secret, { expiresIn: '12h' });
+  return jwt.sign(payload, secret, { expiresIn: '1992h' });
 };
 
 const sendAuthResponse = (res, user, status = 200) => {
