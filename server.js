@@ -118,12 +118,3 @@ const client = new S3Client({
   }
 });
 
-async function getLink() {
-  const command = new GetObjectCommand({
-    Bucket: "rapydlaunchbucket",
-    Key: "recordings/895-114-555/1759133434963.mp4"
-  });
-  const url = await getSignedUrl(client, command, { expiresIn: 3600 });
-  console.log("Pre-signed URL:", url);
-}
-getLink();

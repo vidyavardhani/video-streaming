@@ -1276,10 +1276,17 @@
     qnaInput: document.getElementById('qna-input'),
     qnaList: document.getElementById('qna-list'),
     recordingStatus: document.getElementById('recording-status'),
+    meetingStartTime: document.getElementById('meeting-start-time'),
+    recordingTimer: document.getElementById('recording-timer'),
     recordingStart: document.getElementById('recording-start'),
     recordingStop: document.getElementById('recording-stop'),
     recordingPause: document.getElementById('recording-pause'),
     recordingLink: document.getElementById('recording-link'),
+    // Header meters
+    meterMeeting: document.getElementById('meter-meeting'),
+    meterMeetingTime: document.getElementById('meter-meeting-time'),
+    meterRecording: document.getElementById('meter-recording'),
+    meterRecordingTime: document.getElementById('meter-recording-time'),
     handRaiseBtn: document.getElementById('hand-raise-btn'),
     raisedHands: document.getElementById('raised-hands'),
     raisedHandsList: document.getElementById('raised-hands-list'),
@@ -1352,6 +1359,113 @@
   }
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+  const preferredAudioCodecs = ['audio/opus'];
+  const preferredVideoCodecs = ['video/av1', 'video/vp9', 'video/vp8', 'video/h264'];
+
+  const extractCodecOrdering = (kind, preferences = []) => {
+    const capability = (window.RTCRtpSender || {}).getCapabilities?.(kind);
+    if (!capability?.codecs?.length) return null;
+    let remaining = [...capability.codecs];
+    const ordered = [];
+
+    const pullCodec = (mimeType) => {
+      const lower = mimeType.toLowerCase();
+      const matches = remaining.filter((codec) => codec.mimeType?.toLowerCase() === lower);
+      if (!matches.length) return;
+      matches.forEach((codec) => {
+        ordered.push(codec);
+        remaining = remaining.filter((item) => item !== codec);
+        if (kind === 'video') {
+          const rtxIndex = remaining.findIndex(
+            (item) =>
+              item.mimeType?.toLowerCase() === 'video/rtx' &&
+              item.sdpFmtpLine?.includes(`apt=${codec.preferredPayloadType}`)
+          );
+          if (rtxIndex !== -1) {
+            ordered.push(remaining.splice(rtxIndex, 1)[0]);
+          }
+        }
+      });
+    };
+
+    preferences.forEach((mime) => pullCodec(mime));
+    return ordered.concat(remaining);
+  };
+
+  const applyPreferredCodecs = (pc) => {
+    if (!pc?.getTransceivers) return;
+    const transceivers = pc.getTransceivers();
+    transceivers.forEach((transceiver) => {
+      const track = transceiver.sender?.track || transceiver.receiver?.track;
+      if (!track || typeof transceiver.setCodecPreferences !== 'function') return;
+      const preferences = track.kind === 'audio' ? preferredAudioCodecs : preferredVideoCodecs;
+      const ordered = extractCodecOrdering(track.kind, preferences);
+      if (!ordered) return;
+      try {
+        transceiver.setCodecPreferences(ordered);
+      } catch (error) {
+        console.warn('Unable to apply codec preferences', error);
+      }
+    });
+  };
+
+  const configureSenderParameters = (sender, { track, isScreen = false } = {}) => {
+    if (!sender || !track || typeof sender.getParameters !== 'function') return;
+    try {
+      const params = sender.getParameters();
+      if (!params) return;
+      if (track.kind === 'audio') {
+        params.encodings = params.encodings && params.encodings.length ? params.encodings : [{}];
+        params.encodings[0] = {
+          ...params.encodings[0],
+          maxBitrate: Math.min(96000, params.encodings[0]?.maxBitrate || 96000),
+          priority: 'high'
+        };
+      } else if (track.kind === 'video') {
+        const hasSimulcast = Array.isArray(params.encodings) && params.encodings.length > 1;
+        if (!hasSimulcast) {
+          params.encodings = isScreen
+            ? [
+                { rid: 'screen-low', scaleResolutionDownBy: 2, maxBitrate: 800000 },
+                { rid: 'screen-high', scaleResolutionDownBy: 1, maxBitrate: 2400000, scalabilityMode: 'L3T3' }
+              ]
+            : [
+                { rid: 'cam-low', scaleResolutionDownBy: 4, maxBitrate: 200000 },
+                { rid: 'cam-mid', scaleResolutionDownBy: 2, maxBitrate: 600000 },
+                { rid: 'cam-high', scaleResolutionDownBy: 1, maxBitrate: 1500000, scalabilityMode: 'L3T3' }
+              ];
+        }
+        params.degradationPreference = isScreen ? 'maintain-resolution' : 'balanced';
+      }
+      sender.setParameters(params).catch((error) => {
+        if (track.kind === 'video' && params.encodings?.length) {
+          const fallback = {
+            ...params,
+            encodings: params.encodings.map(({ scalabilityMode, ...encoding }) => ({ ...encoding }))
+          };
+          sender
+            .setParameters(fallback)
+            .catch((fallbackError) => console.warn('Failed to set RTCRtpSender parameters', fallbackError));
+        } else {
+          console.warn('Failed to set RTCRtpSender parameters', error);
+        }
+      });
+    } catch (error) {
+      console.warn('Unable to configure sender parameters', error);
+    }
+  };
+
+  const addConfiguredTrack = (pc, track, stream, options = {}) => {
+    if (!pc || !track) return null;
+    const sender = pc.addTrack(track, stream);
+    configureSenderParameters(sender, { track, ...options });
+    const schedule = typeof queueMicrotask === 'function'
+      ? queueMicrotask
+      : (callback) => Promise.resolve().then(callback);
+    schedule(() => applyPreferredCodecs(pc));
+    return sender;
+  };
 
   class ToneManager {
     constructor({ toggleEl, storage, storageKey = 'vs_tones_enabled' } = {}) {
@@ -2398,7 +2512,10 @@
         const pc = this.createPeer(call.token);
         call.pc = pc;
         const stream = await this.ensureLocalStream(call);
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        stream.getTracks().forEach((track) => {
+          addConfiguredTrack(pc, track, stream);
+        });
+        applyPreferredCodecs(pc);
         if (initiator) {
           const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
           await pc.setLocalDescription(offer);
@@ -2469,8 +2586,11 @@
         await pc.setRemoteDescription(data.sdp);
         const stream = await this.ensureLocalStream(call);
         if (stream) {
-          stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+          stream.getTracks().forEach((track) => {
+            addConfiguredTrack(pc, track, stream);
+          });
         }
+        applyPreferredCodecs(pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         this.socket?.emit('direct:call:signal', { target: from, data: { type: 'answer', sdp: answer } });
@@ -2668,6 +2788,9 @@
           echoCancellation: { ideal: true },
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true },
+          sampleRate: { ideal: 48000 },
+          sampleSize: { ideal: 16 },
+          channelCount: { ideal: 1 },
           ...base
         };
       };
@@ -2678,6 +2801,7 @@
         const result = {
           width: { ideal: 1280 },
           height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 60 },
           ...base
         };
         const preferred = this.state?.preferredCamera || {};
@@ -3652,6 +3776,15 @@
         elements.recordingLink.textContent = '';
       }
     }
+
+    // Toggle timer visibility
+    if (elements.recordingTimer) {
+      elements.recordingTimer.classList.toggle('hidden', !isRecording);
+    }
+    // Toggle header recording meter
+    if (elements.meterRecording) {
+      elements.meterRecording.classList.toggle('hidden', !isRecording);
+    }
   };
 
   const applyRecordingPayload = (payload = {}) => {
@@ -3659,6 +3792,10 @@
     state.classInfo = state.classInfo || {};
     const recording = payload.recording || payload;
     if (recording) {
+      // Fallback: seed startedAt if missing when recording starts client-side
+      if (recording.isRecording && !recording.startedAt && !state.recording?.startedAt) {
+        recording.startedAt = new Date().toISOString();
+      }
       state.recording = { ...recording, isPaused: !!recording.isPaused };
       state.classInfo.recording = state.recording;
     }
@@ -3670,6 +3807,72 @@
     }
     updateRecordingStatus();
     syncRecordingManager(state.recording);
+    updateRecordingTimer();
+  };
+
+  // Timers: meeting start and recording elapsed
+  let meetingStartInterval = null;
+  let recordingTimerInterval = null;
+
+  const formatHMS = (ms) => {
+    if (!Number.isFinite(ms) || ms < 0) ms = 0;
+    const totalSec = Math.floor(ms / 1000);
+    const h = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+    const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+    const s = String(totalSec % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  };
+
+  const updateMeetingStartTime = () => {
+    const el = elements.meetingStartTime;
+    const headerEl = elements.meterMeetingTime;
+    if (!el && !headerEl) return;
+    const startedAt = state.classInfo?.startedAt || state.classInfo?.startTime || state.classInfo?.createdAt;
+    if (!startedAt) {
+      if (el) el.textContent = 'Not started';
+      if (headerEl) headerEl.textContent = '00:00:00';
+      return;
+    }
+    const started = new Date(startedAt).getTime();
+    if (!Number.isFinite(started)) {
+      if (el) el.textContent = 'Not started';
+      if (headerEl) headerEl.textContent = '00:00:00';
+      return;
+    }
+    const update = () => {
+      const diff = Date.now() - started;
+      if (el) el.textContent = `Meeting started ${formatHMS(diff)} ago`;
+      if (headerEl) headerEl.textContent = formatHMS(diff);
+    };
+    clearInterval(meetingStartInterval);
+    meetingStartInterval = setInterval(update, 1000);
+    update();
+  };
+
+  const updateRecordingTimer = () => {
+    const el = elements.recordingTimer;
+    const headerEl = elements.meterRecordingTime;
+    if (!el && !headerEl) return;
+    const rec = state.recording;
+    if (!rec?.isRecording || !rec?.startedAt) {
+      if (el) el.textContent = '00:00:00';
+      if (headerEl) headerEl.textContent = '00:00:00';
+      clearInterval(recordingTimerInterval);
+      return;
+    }
+    const baseStart = new Date(rec.startedAt).getTime();
+    if (!Number.isFinite(baseStart)) return;
+    const pausedFor = Number(rec.totalPausedMs || 0);
+    const update = () => {
+      const now = Date.now();
+      const effectiveStart = baseStart + pausedFor;
+      const diff = Math.max(0, now - effectiveStart);
+      if (el) el.textContent = formatHMS(diff);
+      if (headerEl) headerEl.textContent = formatHMS(diff);
+    };
+    clearInterval(recordingTimerInterval);
+    recordingTimerInterval = setInterval(update, 1000);
+    update();
   };
 
   const performRecordingAction = async (action, { body = null, headers: customHeaders = {} } = {}) => {
@@ -4857,10 +5060,11 @@
         if (sender && typeof sender.replaceTrack === 'function') {
           sender
             .replaceTrack(track)
+            .then(() => configureSenderParameters(sender, { track }))
             .catch((error) => console.warn('replaceTrack error', error));
         } else {
           try {
-            pc.addTrack(track, stream);
+            addConfiguredTrack(pc, track, stream);
           } catch (error) {
             console.warn('addTrack error', error);
           }
@@ -5125,6 +5329,13 @@
     state.pollHistory = state.classInfo.pollHistory || [];
     state.questions = state.classInfo.questions || [];
     state.recording = state.classInfo.recording || { isRecording: false, isPaused: false };
+    // Fallback: seed meeting startedAt if missing
+    if (!state.classInfo.startedAt) {
+      state.classInfo.startedAt = state.classInfo.startedAt || state.classInfo.startTime || state.classInfo.createdAt || new Date().toISOString();
+    }
+    // Initialize timers for meeting and recording
+    try { updateMeetingStartTime(); } catch (_) {}
+    try { updateRecordingTimer(); } catch (_) {}
     applyMediaState('host', state.classInfo.hostMediaState || { audio: false, video: false });
     (state.classInfo.participants || []).forEach((participant) => {
       applyMediaState(participant.token, participant.mediaState);
@@ -5793,12 +6004,16 @@
     connectionWatchdog?.watchPeer(pc);
 
     if (state.isHost && state.localStream) {
-      state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
+      state.localStream.getTracks().forEach((track) => {
+        addConfiguredTrack(pc, track, state.localStream);
+      });
     }
     if (state.isHost && state.screenStream) {
       state.screenStream.getTracks().forEach((track) => {
-        const sender = pc.addTrack(track, state.screenStream);
-        state.screenSenders.push({ pc, sender, token: targetToken, track });
+        const sender = addConfiguredTrack(pc, track, state.screenStream, { isScreen: true });
+        if (sender) {
+          state.screenSenders.push({ pc, sender, token: targetToken, track });
+        }
       });
     }
 
@@ -5914,6 +6129,7 @@
     if (initiator) {
       setTimeout(async () => {
         try {
+          applyPreferredCodecs(pc);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           state.socket.emit('webrtc:signal', {
@@ -5933,6 +6149,7 @@
   const renegotiate = async (pc, targetToken, options = {}) => {
     try {
       const offerOptions = options.iceRestart ? { iceRestart: true } : {};
+      applyPreferredCodecs(pc);
       const offer = await pc.createOffer(offerOptions);
       await pc.setLocalDescription(offer);
       state.socket.emit('webrtc:signal', {
@@ -5961,8 +6178,11 @@
           await setupPreview();
         }
         if (state.localStream) {
-          state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
+          state.localStream.getTracks().forEach((track) => {
+            addConfiguredTrack(pc, track, state.localStream);
+          });
         }
+        applyPreferredCodecs(pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         state.socket.emit('webrtc:signal', {
@@ -7282,8 +7502,10 @@
       const tracks = displayStream.getTracks();
       state.peers.forEach((pc, token) => {
         tracks.forEach((track) => {
-          const sender = pc.addTrack(track, displayStream);
-          state.screenSenders.push({ pc, sender, token, track });
+          const sender = addConfiguredTrack(pc, track, displayStream, { isScreen: true });
+          if (sender) {
+            state.screenSenders.push({ pc, sender, token, track });
+          }
         });
         renegotiate(pc, token);
       });

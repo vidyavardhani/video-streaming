@@ -76,9 +76,15 @@
           <div class="meeting-heading">
             <span class="meeting-context">VVD Live Session</span>
             <h2 id="live-meeting-title">Live class</h2>
-           
           </div>
           <div class="header-meta">
+            <div class="meeting-meters">
+              <span id="meter-meeting" class="meter-chip" aria-label="Meeting elapsed" title="Meeting elapsed">⏱ <span id="meter-meeting-time">00:00:00</span></span>
+              <span id="meter-recording" class="meter-chip hidden" aria-label="Recording elapsed" title="Recording elapsed">
+                <span class="dot" aria-hidden="true"></span>
+                REC <span id="meter-recording-time">00:00:00</span>
+              </span>
+            </div>
             <button class="header-btn" id="share-info" type="button" aria-label="Copy invite link" data-tooltip="Copy invite link">
               <span class="icon">
                 <svg viewBox="0 0 24 24" role="presentation" focusable="false">
@@ -217,6 +223,10 @@
             <section class="utility-pane hidden" data-pane="recording">
               <div class="panel-card">
                 <div id="recording-status" class="recording-status">Recording inactive</div>
+                <div class="recording-meta">
+                  <span id="meeting-start-time" class="muted">—</span>
+                  <span id="recording-timer" class="recording-timer hidden">00:00:00</span>
+                </div>
                 <div class="recording-actions">
                   <button id="recording-start" class="primary small">Start recording</button>
                   <button id="recording-pause" class="ghost small">Pause recording</button>
