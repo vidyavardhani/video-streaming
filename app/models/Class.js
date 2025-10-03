@@ -296,4 +296,4 @@ classSchema.pre('save', function generateTokens(next) {
   next();
 });
 
-module.exports = mongoose.model('Class', classSchema);
+module.exports = mongoose.model('ClassStream', classSchema);
