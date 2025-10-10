@@ -368,6 +368,96 @@
     }
   };
 
+  const loadUploadingVideos = async () => {
+    try {
+      const res = await fetch('/admin/uploading-videos');
+      if (!res.ok) {
+        throw new Error('Unable to load uploading videos');
+      }
+      const data = await res.json();
+      renderUploadingVideos(data);
+    } catch (error) {
+      console.error('Error loading uploading videos:', error);
+    }
+  };
+
+  const renderUploadingVideos = (data) => {
+    const list = document.getElementById('uploading-videos-list');
+    const empty = document.getElementById('uploading-empty');
+    
+    if (!list || !empty) return;
+
+    console.log('Rendering uploading videos:', data);
+
+    if (!data.videos || data.videos.length === 0) {
+      list.classList.add('hidden');
+      empty.classList.remove('hidden');
+      empty.textContent = 'No videos currently uploading.';
+      return;
+    }
+
+    empty.classList.add('hidden');
+    list.classList.remove('hidden');
+    list.innerHTML = '';
+
+    data.videos.forEach(video => {
+      const li = document.createElement('li');
+      li.className = 'panel-list-item uploading-video-item';
+      
+      // Determine status icon and text
+      let statusIcon = '📤';
+      let statusText = 'Queued';
+      let statusClass = 'queued';
+      
+      switch(video.recording.uploadStatus) {
+        case 'uploading':
+          statusIcon = '⬆️';
+          statusText = 'Uploading...';
+          statusClass = 'uploading';
+          break;
+        case 'queued':
+          statusIcon = '📤';
+          statusText = 'Queued';
+          statusClass = 'queued';
+          break;
+        case 'completed':
+          statusIcon = '✅';
+          statusText = 'Just Completed';
+          statusClass = 'completed';
+          break;
+        case 'failed':
+          statusIcon = '⚠️';
+          statusText = 'Retrying...';
+          statusClass = 'failed';
+          break;
+      }
+      
+      const finishedDate = video.recording.finishedAt 
+        ? new Date(video.recording.finishedAt).toLocaleString() 
+        : 'Unknown';
+
+      li.innerHTML = `
+        <div class="uploading-video-info">
+          <div class="uploading-video-header">
+            <strong>${video.title || 'Untitled Class'}</strong>
+            <span class="upload-status-badge ${statusClass}">${statusIcon} ${statusText}</span>
+          </div>
+          <div class="uploading-video-meta">
+            <span>Code: ${video.meetingCode}</span>
+            <span>•</span>
+            <span>Finished: ${finishedDate}</span>
+          </div>
+          ${video.host?.name ? `<div class="uploading-video-host">Host: ${video.host.name}</div>` : ''}
+          ${video.recordedVideoLink ? `<div class="uploading-video-link"><a href="${video.recordedVideoLink}" target="_blank">View Recording</a></div>` : ''}
+        </div>
+      `;
+      
+      list.appendChild(li);
+    });
+
+    console.log(`Rendered ${data.videos.length} uploading video(s)`);
+  };
+
   const loadUser = async () => {
     try {
       const res = await fetch('/auth/me');
@@ -681,7 +771,21 @@
   initBindings();
   switchView('overview');
   setProfileEditing(false);
-  await Promise.all([loadUser(), loadClasses()]);
+  await Promise.all([loadUser(), loadClasses(), loadUploadingVideos()]);
+  
+  // Set up auto-refresh for uploading videos every 10 seconds
+  setInterval(() => {
+    loadUploadingVideos();
+  }, 10000);
+  
+  // Refresh button for uploading videos
+  const refreshBtn = document.getElementById('refresh-uploading');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      loadUploadingVideos();
+      showToast('Refreshed uploading videos');
+    });
+  }
   };
 
   init();

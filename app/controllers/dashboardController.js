@@ -116,13 +116,22 @@ exports.generateApiKey = async (req, res) => {
 
 exports.uploadingVideos = async (req, res) => {
   try {
-    // Get all classes with videos being uploaded
+    // Get all classes with videos being uploaded OR recently completed (within 2 minutes)
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    
     const uploadingClasses = await ClassModel.find({
       $or: [
         { 'recording.uploadStatus': 'queued' },
-        { 'recording.uploadStatus': 'uploading' }
+        { 'recording.uploadStatus': 'uploading' },
+        // Also show recently completed for visibility
+        { 
+          'recording.uploadStatus': 'completed',
+          'recording.uploadedAt': { $gte: twoMinutesAgo }
+        }
       ]
     }).populate('host').sort({ 'recording.finishedAt': -1 });
+
+    console.log(`Found ${uploadingClasses.length} uploading/recent videos`);
 
     const uploadingVideos = uploadingClasses.map(klass => ({
       classId: klass._id,
@@ -138,6 +147,7 @@ exports.uploadingVideos = async (req, res) => {
         finishedAt: klass.recording?.finishedAt,
         durationMs: klass.recording?.durationMs,
         uploadStatus: klass.recording?.uploadStatus,
+        uploadedAt: klass.recording?.uploadedAt,
         fileKey: klass.recording?.fileKey
       },
       recordedVideoLink: klass.recordedVideoLink,
