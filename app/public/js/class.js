@@ -3901,6 +3901,9 @@
     try {
       console.log(`📤 Uploading from IndexedDB: ${upload.fileName}`);
       
+      // Show toast for background upload
+      showLiveToast(`⬆️ Uploading saved recording (attempt ${upload.attempts + 1})...`, { duration: 3000 });
+      
       const formData = new FormData();
       formData.append('recording', upload.blob, upload.fileName);
       formData.append('mimeType', upload.mimeType);
@@ -3926,6 +3929,7 @@
       
       if (data?.uploadStatus === 'queued' || data?.uploadStatus === 'uploading') {
         console.log(`✅ Upload successful: ${upload.fileName}`);
+        showLiveToast('✅ Background upload successful!', { duration: 3000 });
         applyRecordingPayload(data);
         return { success: true, data };
       }
@@ -3934,6 +3938,7 @@
       
     } catch (error) {
       console.error(`❌ Upload failed: ${upload.fileName}`, error);
+      showLiveToast(`⚠️ Upload failed - will retry in background`, { duration: 3000 });
       return { success: false, error: error.message };
     }
   };
@@ -4087,8 +4092,8 @@
             savedToIndexedDB = true;
             console.log('✅ Video saved to IndexedDB - will auto-upload in background');
             
-            // Show user-friendly message
-            alert('Recording saved! Upload will continue in background automatically.');
+            // Show toast notification
+            showLiveToast('📹 Recording saved! Uploading in background...', { duration: 3000 });
             
           } catch (indexedDBError) {
             console.error('Failed to save to IndexedDB:', indexedDBError);
@@ -6096,14 +6101,17 @@
       }
       updateRecordingStatus();
       
-      // Show notification for upload completion or failure
-      if (payload.status === 'completed') {
+      // Show toast notifications for upload progress
+      if (payload.status === 'queued') {
+        showLiveToast('📤 Video queued for upload...', { duration: 2000 });
+      } else if (payload.status === 'uploading') {
+        showLiveToast('⬆️ Uploading video to server...', { duration: 3000 });
+      } else if (payload.status === 'completed') {
         console.log('Video uploaded successfully:', payload.uploadUrl);
+        showLiveToast('✅ Video uploaded successfully!', { duration: 3000 });
       } else if (payload.status === 'failed') {
         console.error('Video upload failed:', payload.error);
-        if (state.isHost) {
-          alert('Video upload failed: ' + (payload.message || payload.error || 'Unknown error'));
-        }
+        showLiveToast('❌ Video upload failed - will retry automatically', { duration: 4000 });
       }
     });
 
@@ -6113,6 +6121,7 @@
       state.classInfo.recordingClassLink = payload.recordingClassLink;
       state.uploadStatus = 'completed';
       updateRecordingStatus();
+      showLiveToast('🎬 Recording ready for download!', { duration: 3000 });
     });
 
     state.socket.on('webrtc:signal', handleSignal);
@@ -7884,7 +7893,7 @@
         const pendingCount = await window.uploadQueue.getPendingCount();
         if (pendingCount > 0) {
           console.log(`🔄 Found ${pendingCount} pending upload(s) from previous session`);
-          alert(`You have ${pendingCount} video(s) waiting to upload. Upload will continue in background.`);
+          showLiveToast(`🔄 ${pendingCount} recording(s) pending - uploading in background...`, { duration: 4000 });
         }
       } catch (error) {
         console.error('Failed to initialize upload queue:', error);
