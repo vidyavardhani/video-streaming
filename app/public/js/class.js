@@ -3779,9 +3779,16 @@
     }
     if (elements.recordingLink) {
       const link = state.classInfo?.recordingClassLink || state.classInfo?.recordedVideoLink;
-      if (link) {
+      const uploadStatus = state.uploadStatus || state.recording?.uploadStatus;
+      
+      // Only show download link if upload is completed and link is available
+      if (link && uploadStatus === 'completed') {
         elements.recordingLink.classList.remove('hidden');
         elements.recordingLink.innerHTML = `<a href="${link}" target="_blank" rel="noopener">Download recording</a>`;
+      } else if (uploadStatus === 'queued' || uploadStatus === 'uploading') {
+        // Show upload status instead of download link
+        elements.recordingLink.classList.remove('hidden');
+        elements.recordingLink.innerHTML = `<span style="color: var(--muted);">Upload in progress, please wait...</span>`;
       } else {
         elements.recordingLink.classList.add('hidden');
         elements.recordingLink.textContent = '';
@@ -3992,20 +3999,38 @@
         }
         formData.append('size', String(recordingResult.blob.size));
       }
-      await performRecordingAction('stop', { body: formData });
+      const response = await performRecordingAction('stop', { body: formData });
+      
+      // Check if upload was queued successfully
+      if (response?.uploadStatus === 'queued') {
+        console.log('Recording queued for upload');
+        // Don't download - let the queue handle it
+      }
     } catch (error) {
       console.error('stopRecordingSession error', error);
-      if (recordingResult?.blob) {
-        const fileName = promptLocalDownload(
-          recordingResult.blob,
-          recordingResult.mimeType || recordingResult.blob.type || 'video/webm'
+      
+      // Only download if queueing completely failed AND we have the blob
+      // This is a last resort - the queue system should handle retries
+      const shouldDownload = recordingResult?.blob && 
+                            error.message && 
+                            (error.message.includes('Network') || error.message.includes('Failed to fetch'));
+      
+      if (shouldDownload) {
+        // Ask user before downloading
+        const userWantsDownload = confirm(
+          'Unable to queue video for upload. Would you like to download the recording to your device as a backup?'
         );
-        alert(
-          `Recording upload failed. ${fileName ? `${fileName} ` : ''}has been downloaded to your device instead.`
-        );
-      } else {
-        alert(error.message || 'Unable to stop recording');
+        
+        if (userWantsDownload) {
+          const fileName = promptLocalDownload(
+            recordingResult.blob,
+            recordingResult.mimeType || recordingResult.blob.type || 'video/webm'
+          );
+          console.log(`Recording downloaded as backup: ${fileName}`);
+        }
       }
+      
+      // Try to stop recording on server even without video data
       try {
         await performRecordingAction('stop', { body: new FormData() });
       } catch (secondaryError) {
