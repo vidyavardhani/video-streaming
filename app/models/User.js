@@ -20,6 +20,14 @@ const userSchema = new mongoose.Schema({
     enum: ['teacher', 'student', 'admin'],
     default: 'student'
   },
+  institute: {
+    type: String,
+    default: null
+  },
+  location: {
+    type: String,
+    default: null
+  },
   status: {
     type: String,
     enum: ['offline', 'online'],

@@ -145,32 +145,63 @@ const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceho
 
   if (!providedBuffer || providedBuffer.length === 0) {
     if (!allowPlaceholder) {
+      console.error('Recording data missing for class:', klass.meetingCode);
       throw new Error('Recording data missing');
     }
+    console.warn('Recording stopped without data for class:', klass.meetingCode);
   }
 
-  const finalBuffer = providedBuffer && providedBuffer.length
-    ? providedBuffer
-    : Buffer.from('Recording unavailable');
-
-  const extension = determineExtension(normalizedMime);
-  const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.${extension}`;
-  const link = await buildFinalLink(fileKey, finalBuffer, normalizedMime);
-
-  const parsedDuration = Number(durationMs);
-
-  klass.recording = {
-    ...(klass.recording || {}),
-    isRecording: false,
-    isPaused: false,
-    pausedAt: null,
-    finishedAt: new Date(),
-    durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
-    fileKey
-  };
-  klass.recordedVideoLink = link;
-  klass.recordingClassLink = link;
-  return link;
+  // Only save recording link if we have valid data
+  if (providedBuffer && providedBuffer.length > 0) {
+    const extension = determineExtension(normalizedMime);
+    const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.${extension}`;
+    
+    try {
+      const link = await buildFinalLink(fileKey, providedBuffer, normalizedMime);
+      
+      const parsedDuration = Number(durationMs);
+      
+      klass.recording = {
+        ...(klass.recording || {}),
+        isRecording: false,
+        isPaused: false,
+        pausedAt: null,
+        finishedAt: new Date(),
+        durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
+        fileKey
+      };
+      klass.recordedVideoLink = link;
+      klass.recordingClassLink = link;
+      return link;
+    } catch (uploadError) {
+      console.error('Failed to upload recording:', uploadError);
+      // Still mark recording as stopped even if upload fails
+      klass.recording = {
+        ...(klass.recording || {}),
+        isRecording: false,
+        isPaused: false,
+        pausedAt: null,
+        finishedAt: new Date(),
+        durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : klass.recording?.durationMs || null,
+        fileKey: null
+      };
+      throw new Error('Failed to save recording');
+    }
+  } else {
+    // No data provided but placeholder is allowed
+    klass.recording = {
+      ...(klass.recording || {}),
+      isRecording: false,
+      isPaused: false,
+      pausedAt: null,
+      finishedAt: new Date(),
+      durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : klass.recording?.durationMs || null,
+      fileKey: null
+    };
+    klass.recordedVideoLink = null;
+    klass.recordingClassLink = null;
+    return null;
+  }
 };
 
 module.exports = {

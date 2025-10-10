@@ -7624,6 +7624,58 @@
     }
   });
 
+  // Handle device changes - automatically switch to external camera when connected
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+    navigator.mediaDevices.addEventListener('devicechange', async () => {
+      try {
+        const previousCameras = state.availableCameras || [];
+        const currentCameras = await refreshAvailableCameras();
+        
+        // Check if a new camera was added
+        if (currentCameras.length > previousCameras.length) {
+          const newCameras = currentCameras.filter(cam => 
+            !previousCameras.some(prev => prev.deviceId === cam.deviceId)
+          );
+          
+          if (newCameras.length > 0 && state.localStream) {
+            // A new camera was connected - switch to it if video is enabled
+            const videoEnabled = isTrackEnabled('video');
+            if (videoEnabled) {
+              const newCamera = newCameras[0];
+              console.log('New camera detected:', newCamera.label || newCamera.deviceId);
+              
+              // Update preferred camera to the new device
+              state.preferredCamera = {
+                deviceId: newCamera.deviceId,
+                facingMode: null
+              };
+              
+              // Re-acquire stream with new camera
+              if (permissionManager) {
+                try {
+                  await permissionManager.acquireStream({ 
+                    audio: isTrackEnabled('audio'), 
+                    video: true, 
+                    replace: true 
+                  });
+                  showLiveToast(`Switched to ${newCamera.label || 'external camera'}`);
+                } catch (error) {
+                  console.error('Failed to switch to new camera:', error);
+                }
+              }
+            }
+          }
+        }
+        
+        // Update camera menu options
+        await updateQuickCameraButton(currentCameras).catch(() => {});
+        await syncCameraMenuOptions().catch(() => {});
+      } catch (error) {
+        console.warn('devicechange handler error:', error);
+      }
+    });
+  }
+
   const init = async () => {
     hideRejoinPrompt();
     initializeComponents();
