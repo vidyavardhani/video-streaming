@@ -15,6 +15,7 @@ router.get('/users', authenticate, requireTeacher, dashboardController.listUsers
 router.get('/users/live', authenticate, requireTeacher, dashboardController.listLiveUsers);
 router.get('/institutes', authenticate, requireTeacher, dashboardController.listInstitutes);
 router.get('/analytics/overview', authenticate, requireTeacher, dashboardController.analyticsOverview);
+router.get('/uploading-videos', authenticate, requireTeacher, dashboardController.uploadingVideos);
 router.get('/chat/:code', authenticate, requireTeacher, dashboardController.classChatLogs);
 router.post('/developer/api-key', authenticate, requireTeacher, dashboardController.generateApiKey);
 

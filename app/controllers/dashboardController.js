@@ -113,3 +113,43 @@ exports.generateApiKey = async (req, res) => {
     res.status(500).json({ message: 'Unable to generate API key' });
   }
 };
+
+exports.uploadingVideos = async (req, res) => {
+  try {
+    // Get all classes with videos being uploaded
+    const uploadingClasses = await ClassModel.find({
+      $or: [
+        { 'recording.uploadStatus': 'queued' },
+        { 'recording.uploadStatus': 'uploading' }
+      ]
+    }).populate('host').sort({ 'recording.finishedAt': -1 });
+
+    const uploadingVideos = uploadingClasses.map(klass => ({
+      classId: klass._id,
+      meetingCode: klass.meetingCode,
+      title: klass.title,
+      host: {
+        id: klass.host?._id,
+        name: klass.host?.name,
+        email: klass.host?.email
+      },
+      recording: {
+        startedAt: klass.recording?.startedAt,
+        finishedAt: klass.recording?.finishedAt,
+        durationMs: klass.recording?.durationMs,
+        uploadStatus: klass.recording?.uploadStatus,
+        fileKey: klass.recording?.fileKey
+      },
+      recordedVideoLink: klass.recordedVideoLink,
+      recordingClassLink: klass.recordingClassLink
+    }));
+
+    res.json({
+      count: uploadingVideos.length,
+      videos: uploadingVideos
+    });
+  } catch (error) {
+    console.error('Uploading videos error', error);
+    res.status(500).json({ message: 'Unable to load uploading videos' });
+  }
+};
