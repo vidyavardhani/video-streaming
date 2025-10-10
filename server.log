@@ -2,5 +2,14 @@
 > video-streaming@1.0.0 start
 > node server.js
 
+🔍 UploadQueue checking AWS config: {
+  region: 'ap-southeast-2',
+  bucket: 'rapydlaunc...',
+  accessKeyId: 'AKIA6GBMFW...',
+  secretAccessKey: '***'
+}
+✅ UploadQueue S3 Client configured: Bucket=rapydlaunchbucket, Region=ap-southeast-2
+✅ RecordingService S3 Client configured: Bucket=rapydlaunchbucket, Region=ap-southeast-2
 Server listening on port 4000
 Connected to MongoDB
+[0mGET / [32m200[0m 18.267 ms - 1408[0m
