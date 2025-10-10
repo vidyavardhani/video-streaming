@@ -3896,6 +3896,48 @@
     update();
   };
 
+  // Upload function for IndexedDB stored videos
+  const uploadFromIndexedDB = async (upload) => {
+    try {
+      console.log(`📤 Uploading from IndexedDB: ${upload.fileName}`);
+      
+      const formData = new FormData();
+      formData.append('recording', upload.blob, upload.fileName);
+      formData.append('mimeType', upload.mimeType);
+      if (upload.durationMs) {
+        formData.append('durationMs', String(upload.durationMs));
+      }
+      formData.append('size', String(upload.size));
+      
+      const options = { 
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined
+      };
+      
+      const res = await fetch(`/classes/${upload.classCode}/recording/stop`, applyHostAuth(options));
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.message || 'Upload failed');
+      }
+      
+      const data = await res.json();
+      
+      if (data?.uploadStatus === 'queued' || data?.uploadStatus === 'uploading') {
+        console.log(`✅ Upload successful: ${upload.fileName}`);
+        applyRecordingPayload(data);
+        return { success: true, data };
+      }
+      
+      return { success: false, error: 'Upload not queued' };
+      
+    } catch (error) {
+      console.error(`❌ Upload failed: ${upload.fileName}`, error);
+      return { success: false, error: error.message };
+    }
+  };
+
   const performRecordingAction = async (action, { body = null, headers: customHeaders = {} } = {}) => {
     if (!state.isHost) return null;
     try {
@@ -4014,29 +4056,54 @@
       }
     }
     
-    // ALWAYS try to upload - NEVER download automatically
-    let uploadAttempted = false;
-    let uploadSuccess = false;
-    
-    // Detect browser/WebView for better compatibility
-    const userAgent = navigator.userAgent || '';
-    const isWebView = /wv|WebView/i.test(userAgent);
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(userAgent);
-    
-    console.log('Browser info:', { isWebView, isMobile, userAgent: userAgent.substring(0, 100) });
+    // NEW STRATEGY: Save to IndexedDB first, then upload from there
+    let savedToIndexedDB = false;
     
     try {
-      const formData = new FormData();
+      // Step 1: Save video to persistent storage (IndexedDB)
       if (recordingResult?.blob && recordingResult.blob.size) {
         const mime = recordingResult.mimeType || recordingResult.blob.type || 'video/webm';
         const fileName = buildRecordingFileName(mime);
         
-        console.log('Preparing upload:', { 
+        console.log('💾 Saving video to local storage first...', { 
           fileName, 
           mime, 
           size: recordingResult.blob.size,
           duration: recordingResult.durationMs 
         });
+        
+        // Save to IndexedDB
+        if (window.uploadQueue) {
+          try {
+            await window.uploadQueue.saveVideo({
+              blob: recordingResult.blob,
+              fileName,
+              mimeType: mime,
+              durationMs: recordingResult.durationMs,
+              size: recordingResult.blob.size,
+              classCode: state.classCode || classCode
+            });
+            
+            savedToIndexedDB = true;
+            console.log('✅ Video saved to IndexedDB - will auto-upload in background');
+            
+            // Show user-friendly message
+            alert('Recording saved! Upload will continue in background automatically.');
+            
+          } catch (indexedDBError) {
+            console.error('Failed to save to IndexedDB:', indexedDBError);
+          }
+        }
+      }
+      
+      // Step 2: Try immediate upload (if IndexedDB save successful, background will handle retries)
+      // If not saved to IndexedDB, try immediate upload as fallback
+      if (!savedToIndexedDB && recordingResult?.blob) {
+        console.log('⚠️ IndexedDB not available, trying direct upload...');
+        
+        const formData = new FormData();
+        const mime = recordingResult.mimeType || recordingResult.blob.type || 'video/webm';
+        const fileName = buildRecordingFileName(mime);
         
         formData.append('recording', recordingResult.blob, fileName);
         formData.append('mimeType', mime);
@@ -4045,78 +4112,37 @@
         }
         formData.append('size', String(recordingResult.blob.size));
         
-        // Add browser info for debugging on server
-        formData.append('browserInfo', JSON.stringify({ isWebView, isMobile }));
-      }
-      
-      uploadAttempted = true;
-      console.log('Attempting upload to server...');
-      const response = await performRecordingAction('stop', { body: formData });
-      
-      // Check if upload was queued successfully
-      if (response?.uploadStatus === 'queued' || response?.uploadStatus === 'uploading') {
-        console.log('✅ Recording queued for upload successfully');
-        uploadSuccess = true;
-      }
-    } catch (error) {
-      console.error('stopRecordingSession error', error);
-      
-      // FORCE RETRY: If initial upload fails, keep trying with exponential backoff
-      if (recordingResult?.blob && !uploadSuccess) {
-        console.log('Initial upload failed, scheduling retry...');
-        
-        // Store blob for retry attempts
-        const retryUpload = async (attempt = 1, maxAttempts = 5) => {
-          if (attempt > maxAttempts) {
-            console.error('All upload retry attempts failed');
-            alert('Unable to upload recording after multiple attempts. Please check your connection and try refreshing the page.');
-            return;
-          }
-          
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Exponential backoff, max 10s
-          console.log(`Retry attempt ${attempt}/${maxAttempts} in ${delay}ms...`);
-          
-          await new Promise(resolve => setTimeout(resolve, delay));
-          
-          try {
-            const formData = new FormData();
-            const mime = recordingResult.mimeType || recordingResult.blob.type || 'video/webm';
-            const fileName = buildRecordingFileName(mime);
-            formData.append('recording', recordingResult.blob, fileName);
-            formData.append('mimeType', mime);
-            if (recordingResult.durationMs) {
-              formData.append('durationMs', String(recordingResult.durationMs));
-            }
-            formData.append('size', String(recordingResult.blob.size));
-            
-            const response = await performRecordingAction('stop', { body: formData });
-            
-            if (response?.uploadStatus === 'queued' || response?.uploadStatus === 'uploading') {
-              console.log(`Upload successful on retry attempt ${attempt}`);
-              return;
-            }
-          } catch (retryError) {
-            console.error(`Retry attempt ${attempt} failed:`, retryError);
-            // Continue to next retry
-            await retryUpload(attempt + 1, maxAttempts);
-          }
-        };
-        
-        // Start retry sequence in background
-        retryUpload().catch(err => console.error('Retry sequence failed:', err));
-      }
-      
-      // Try to stop recording on server even without video data
-      if (!uploadAttempted) {
         try {
-          await performRecordingAction('stop', { body: new FormData() });
-        } catch (secondaryError) {
-          console.error('Secondary stop attempt failed', secondaryError);
+          const response = await performRecordingAction('stop', { body: formData });
+          
+          if (response?.uploadStatus === 'queued' || response?.uploadStatus === 'uploading') {
+            console.log('✅ Direct upload successful');
+          }
+        } catch (uploadError) {
+          console.error('Direct upload failed:', uploadError);
+          alert('Unable to upload recording. Please refresh the page to retry.');
         }
       }
+      
+      // Always try to stop recording on server
+      try {
+        await performRecordingAction('stop', { body: new FormData() });
+      } catch (error) {
+        console.error('Server stop failed:', error);
+      }
+      
+    } catch (error) {
+      console.error('stopRecordingSession error', error);
     } finally {
       state.recordingUploadPending = false;
       updateRecordingStatus();
+      
+      // Trigger immediate queue processing
+      if (savedToIndexedDB && window.uploadQueue) {
+        setTimeout(() => {
+          window.uploadQueue.processQueue(uploadFromIndexedDB);
+        }, 1000);
+      }
     }
   };
 
@@ -7838,6 +7864,32 @@
     syncDrawerState();
     setStageZoom(1);
     applyRoleStyling();
+    
+    // Initialize persistent upload queue for hosts
+    if (state.isHost && window.uploadQueue) {
+      try {
+        await window.uploadQueue.init();
+        console.log('📦 Upload queue initialized');
+        
+        // Start background upload processing
+        window.uploadQueue.startAutoUpload(uploadFromIndexedDB);
+        
+        // Set up status change callback to update UI
+        window.uploadQueue.onStatusChange = async (pendingCount) => {
+          console.log(`📊 Pending uploads: ${pendingCount}`);
+          // You can update UI here to show pending upload count
+        };
+        
+        // Check for any pending uploads on load
+        const pendingCount = await window.uploadQueue.getPendingCount();
+        if (pendingCount > 0) {
+          console.log(`🔄 Found ${pendingCount} pending upload(s) from previous session`);
+          alert(`You have ${pendingCount} video(s) waiting to upload. Upload will continue in background.`);
+        }
+      } catch (error) {
+        console.error('Failed to initialize upload queue:', error);
+      }
+    }
     if (!state.isHost && elements.participantStrip) {
       elements.participantStrip.classList.add('hidden');
     } else if (state.isHost && elements.participantStrip) {
