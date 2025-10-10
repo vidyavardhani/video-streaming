@@ -13,6 +13,17 @@
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const data = Object.fromEntries(new FormData(form).entries());
+      
+      // Trim optional fields and remove if empty
+      if (data.institute) {
+        data.institute = data.institute.trim();
+        if (!data.institute) delete data.institute;
+      }
+      if (data.location) {
+        data.location = data.location.trim();
+        if (!data.location) delete data.location;
+      }
+      
       try {
         const res = await fetch(url, {
           method: 'POST',

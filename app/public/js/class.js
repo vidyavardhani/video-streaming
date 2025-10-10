@@ -1276,10 +1276,17 @@
     qnaInput: document.getElementById('qna-input'),
     qnaList: document.getElementById('qna-list'),
     recordingStatus: document.getElementById('recording-status'),
+    meetingStartTime: document.getElementById('meeting-start-time'),
+    recordingTimer: document.getElementById('recording-timer'),
     recordingStart: document.getElementById('recording-start'),
     recordingStop: document.getElementById('recording-stop'),
     recordingPause: document.getElementById('recording-pause'),
     recordingLink: document.getElementById('recording-link'),
+    // Header meters
+    meterMeeting: document.getElementById('meter-meeting'),
+    meterMeetingTime: document.getElementById('meter-meeting-time'),
+    meterRecording: document.getElementById('meter-recording'),
+    meterRecordingTime: document.getElementById('meter-recording-time'),
     handRaiseBtn: document.getElementById('hand-raise-btn'),
     raisedHands: document.getElementById('raised-hands'),
     raisedHandsList: document.getElementById('raised-hands-list'),
@@ -1352,6 +1359,113 @@
   }
 
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+  const preferredAudioCodecs = ['audio/opus'];
+  const preferredVideoCodecs = ['video/av1', 'video/vp9', 'video/vp8', 'video/h264'];
+
+  const extractCodecOrdering = (kind, preferences = []) => {
+    const capability = (window.RTCRtpSender || {}).getCapabilities?.(kind);
+    if (!capability?.codecs?.length) return null;
+    let remaining = [...capability.codecs];
+    const ordered = [];
+
+    const pullCodec = (mimeType) => {
+      const lower = mimeType.toLowerCase();
+      const matches = remaining.filter((codec) => codec.mimeType?.toLowerCase() === lower);
+      if (!matches.length) return;
+      matches.forEach((codec) => {
+        ordered.push(codec);
+        remaining = remaining.filter((item) => item !== codec);
+        if (kind === 'video') {
+          const rtxIndex = remaining.findIndex(
+            (item) =>
+              item.mimeType?.toLowerCase() === 'video/rtx' &&
+              item.sdpFmtpLine?.includes(`apt=${codec.preferredPayloadType}`)
+          );
+          if (rtxIndex !== -1) {
+            ordered.push(remaining.splice(rtxIndex, 1)[0]);
+          }
+        }
+      });
+    };
+
+    preferences.forEach((mime) => pullCodec(mime));
+    return ordered.concat(remaining);
+  };
+
+  const applyPreferredCodecs = (pc) => {
+    if (!pc?.getTransceivers) return;
+    const transceivers = pc.getTransceivers();
+    transceivers.forEach((transceiver) => {
+      const track = transceiver.sender?.track || transceiver.receiver?.track;
+      if (!track || typeof transceiver.setCodecPreferences !== 'function') return;
+      const preferences = track.kind === 'audio' ? preferredAudioCodecs : preferredVideoCodecs;
+      const ordered = extractCodecOrdering(track.kind, preferences);
+      if (!ordered) return;
+      try {
+        transceiver.setCodecPreferences(ordered);
+      } catch (error) {
+        console.warn('Unable to apply codec preferences', error);
+      }
+    });
+  };
+
+  const configureSenderParameters = (sender, { track, isScreen = false } = {}) => {
+    if (!sender || !track || typeof sender.getParameters !== 'function') return;
+    try {
+      const params = sender.getParameters();
+      if (!params) return;
+      if (track.kind === 'audio') {
+        params.encodings = params.encodings && params.encodings.length ? params.encodings : [{}];
+        params.encodings[0] = {
+          ...params.encodings[0],
+          maxBitrate: Math.min(96000, params.encodings[0]?.maxBitrate || 96000),
+          priority: 'high'
+        };
+      } else if (track.kind === 'video') {
+        const hasSimulcast = Array.isArray(params.encodings) && params.encodings.length > 1;
+        if (!hasSimulcast) {
+          params.encodings = isScreen
+            ? [
+                { rid: 'screen-low', scaleResolutionDownBy: 2, maxBitrate: 800000 },
+                { rid: 'screen-high', scaleResolutionDownBy: 1, maxBitrate: 2400000, scalabilityMode: 'L3T3' }
+              ]
+            : [
+                { rid: 'cam-low', scaleResolutionDownBy: 4, maxBitrate: 200000 },
+                { rid: 'cam-mid', scaleResolutionDownBy: 2, maxBitrate: 600000 },
+                { rid: 'cam-high', scaleResolutionDownBy: 1, maxBitrate: 1500000, scalabilityMode: 'L3T3' }
+              ];
+        }
+        params.degradationPreference = isScreen ? 'maintain-resolution' : 'balanced';
+      }
+      sender.setParameters(params).catch((error) => {
+        if (track.kind === 'video' && params.encodings?.length) {
+          const fallback = {
+            ...params,
+            encodings: params.encodings.map(({ scalabilityMode, ...encoding }) => ({ ...encoding }))
+          };
+          sender
+            .setParameters(fallback)
+            .catch((fallbackError) => console.warn('Failed to set RTCRtpSender parameters', fallbackError));
+        } else {
+          console.warn('Failed to set RTCRtpSender parameters', error);
+        }
+      });
+    } catch (error) {
+      console.warn('Unable to configure sender parameters', error);
+    }
+  };
+
+  const addConfiguredTrack = (pc, track, stream, options = {}) => {
+    if (!pc || !track) return null;
+    const sender = pc.addTrack(track, stream);
+    configureSenderParameters(sender, { track, ...options });
+    const schedule = typeof queueMicrotask === 'function'
+      ? queueMicrotask
+      : (callback) => Promise.resolve().then(callback);
+    schedule(() => applyPreferredCodecs(pc));
+    return sender;
+  };
 
   class ToneManager {
     constructor({ toggleEl, storage, storageKey = 'vs_tones_enabled' } = {}) {
@@ -2398,7 +2512,10 @@
         const pc = this.createPeer(call.token);
         call.pc = pc;
         const stream = await this.ensureLocalStream(call);
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        stream.getTracks().forEach((track) => {
+          addConfiguredTrack(pc, track, stream);
+        });
+        applyPreferredCodecs(pc);
         if (initiator) {
           const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
           await pc.setLocalDescription(offer);
@@ -2469,8 +2586,11 @@
         await pc.setRemoteDescription(data.sdp);
         const stream = await this.ensureLocalStream(call);
         if (stream) {
-          stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+          stream.getTracks().forEach((track) => {
+            addConfiguredTrack(pc, track, stream);
+          });
         }
+        applyPreferredCodecs(pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         this.socket?.emit('direct:call:signal', { target: from, data: { type: 'answer', sdp: answer } });
@@ -2668,6 +2788,9 @@
           echoCancellation: { ideal: true },
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true },
+          sampleRate: { ideal: 48000 },
+          sampleSize: { ideal: 16 },
+          channelCount: { ideal: 1 },
           ...base
         };
       };
@@ -2678,6 +2801,7 @@
         const result = {
           width: { ideal: 1280 },
           height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 60 },
           ...base
         };
         const preferred = this.state?.preferredCamera || {};
@@ -3605,13 +3729,24 @@
     const isRecording = !!state.recording?.isRecording;
     const isPaused = !!state.recording?.isPaused;
     const pending = !!state.recordingUploadPending;
+    const uploadStatus = state.uploadStatus || state.recording?.uploadStatus;
     let statusText = 'Recording inactive';
     if (isRecording) {
       statusText = isPaused ? 'Recording paused' : 'Recording in progress…';
+    } else if (uploadStatus === 'queued') {
+      statusText = 'Video upload queued...';
+    } else if (uploadStatus === 'uploading') {
+      statusText = 'Uploading video to server...';
+    } else if (uploadStatus === 'completed') {
+      statusText = 'Video uploaded successfully';
+    } else if (uploadStatus === 'failed') {
+      statusText = 'Video upload failed';
     }
     elements.recordingStatus.textContent = statusText;
     elements.recordingStatus.classList.toggle('active', isRecording && !isPaused);
     elements.recordingStatus.classList.toggle('paused', isPaused);
+    elements.recordingStatus.classList.toggle('uploading', uploadStatus === 'uploading' || uploadStatus === 'queued');
+    elements.recordingStatus.classList.toggle('uploaded', uploadStatus === 'completed');
     if (elements.recordingStart) {
       elements.recordingStart.classList.toggle('hidden', !state.isHost || isRecording);
       elements.recordingStart.disabled = pending || !state.isHost || isRecording;
@@ -3644,13 +3779,29 @@
     }
     if (elements.recordingLink) {
       const link = state.classInfo?.recordingClassLink || state.classInfo?.recordedVideoLink;
-      if (link) {
+      const uploadStatus = state.uploadStatus || state.recording?.uploadStatus;
+      
+      // Only show download link if upload is completed and link is available
+      if (link && uploadStatus === 'completed') {
         elements.recordingLink.classList.remove('hidden');
         elements.recordingLink.innerHTML = `<a href="${link}" target="_blank" rel="noopener">Download recording</a>`;
+      } else if (uploadStatus === 'queued' || uploadStatus === 'uploading') {
+        // Show upload status instead of download link
+        elements.recordingLink.classList.remove('hidden');
+        elements.recordingLink.innerHTML = `<span style="color: var(--muted);">Upload in progress, please wait...</span>`;
       } else {
         elements.recordingLink.classList.add('hidden');
         elements.recordingLink.textContent = '';
       }
+    }
+
+    // Toggle timer visibility
+    if (elements.recordingTimer) {
+      elements.recordingTimer.classList.toggle('hidden', !isRecording);
+    }
+    // Toggle header recording meter
+    if (elements.meterRecording) {
+      elements.meterRecording.classList.toggle('hidden', !isRecording);
     }
   };
 
@@ -3659,6 +3810,10 @@
     state.classInfo = state.classInfo || {};
     const recording = payload.recording || payload;
     if (recording) {
+      // Fallback: seed startedAt if missing when recording starts client-side
+      if (recording.isRecording && !recording.startedAt && !state.recording?.startedAt) {
+        recording.startedAt = new Date().toISOString();
+      }
       state.recording = { ...recording, isPaused: !!recording.isPaused };
       state.classInfo.recording = state.recording;
     }
@@ -3668,8 +3823,77 @@
     if (Object.prototype.hasOwnProperty.call(payload, 'recordingClassLink')) {
       state.classInfo.recordingClassLink = payload.recordingClassLink;
     }
+    if (Object.prototype.hasOwnProperty.call(payload, 'uploadStatus')) {
+      state.uploadStatus = payload.uploadStatus;
+    }
     updateRecordingStatus();
     syncRecordingManager(state.recording);
+    updateRecordingTimer();
+  };
+
+  // Timers: meeting start and recording elapsed
+  let meetingStartInterval = null;
+  let recordingTimerInterval = null;
+
+  const formatHMS = (ms) => {
+    if (!Number.isFinite(ms) || ms < 0) ms = 0;
+    const totalSec = Math.floor(ms / 1000);
+    const h = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+    const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+    const s = String(totalSec % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  };
+
+  const updateMeetingStartTime = () => {
+    const el = elements.meetingStartTime;
+    const headerEl = elements.meterMeetingTime;
+    if (!el && !headerEl) return;
+    const startedAt = state.classInfo?.startedAt || state.classInfo?.startTime || state.classInfo?.createdAt;
+    if (!startedAt) {
+      if (el) el.textContent = 'Not started';
+      if (headerEl) headerEl.textContent = '00:00:00';
+      return;
+    }
+    const started = new Date(startedAt).getTime();
+    if (!Number.isFinite(started)) {
+      if (el) el.textContent = 'Not started';
+      if (headerEl) headerEl.textContent = '00:00:00';
+      return;
+    }
+    const update = () => {
+      const diff = Date.now() - started;
+      if (el) el.textContent = `Meeting started ${formatHMS(diff)} ago`;
+      if (headerEl) headerEl.textContent = formatHMS(diff);
+    };
+    clearInterval(meetingStartInterval);
+    meetingStartInterval = setInterval(update, 1000);
+    update();
+  };
+
+  const updateRecordingTimer = () => {
+    const el = elements.recordingTimer;
+    const headerEl = elements.meterRecordingTime;
+    if (!el && !headerEl) return;
+    const rec = state.recording;
+    if (!rec?.isRecording || !rec?.startedAt) {
+      if (el) el.textContent = '00:00:00';
+      if (headerEl) headerEl.textContent = '00:00:00';
+      clearInterval(recordingTimerInterval);
+      return;
+    }
+    const baseStart = new Date(rec.startedAt).getTime();
+    if (!Number.isFinite(baseStart)) return;
+    const pausedFor = Number(rec.totalPausedMs || 0);
+    const update = () => {
+      const now = Date.now();
+      const effectiveStart = baseStart + pausedFor;
+      const diff = Math.max(0, now - effectiveStart);
+      if (el) el.textContent = formatHMS(diff);
+      if (headerEl) headerEl.textContent = formatHMS(diff);
+    };
+    clearInterval(recordingTimerInterval);
+    recordingTimerInterval = setInterval(update, 1000);
+    update();
   };
 
   const performRecordingAction = async (action, { body = null, headers: customHeaders = {} } = {}) => {
@@ -3775,20 +3999,38 @@
         }
         formData.append('size', String(recordingResult.blob.size));
       }
-      await performRecordingAction('stop', { body: formData });
+      const response = await performRecordingAction('stop', { body: formData });
+      
+      // Check if upload was queued successfully
+      if (response?.uploadStatus === 'queued') {
+        console.log('Recording queued for upload');
+        // Don't download - let the queue handle it
+      }
     } catch (error) {
       console.error('stopRecordingSession error', error);
-      if (recordingResult?.blob) {
-        const fileName = promptLocalDownload(
-          recordingResult.blob,
-          recordingResult.mimeType || recordingResult.blob.type || 'video/webm'
+      
+      // Only download if queueing completely failed AND we have the blob
+      // This is a last resort - the queue system should handle retries
+      const shouldDownload = recordingResult?.blob && 
+                            error.message && 
+                            (error.message.includes('Network') || error.message.includes('Failed to fetch'));
+      
+      if (shouldDownload) {
+        // Ask user before downloading
+        const userWantsDownload = confirm(
+          'Unable to queue video for upload. Would you like to download the recording to your device as a backup?'
         );
-        alert(
-          `Recording upload failed. ${fileName ? `${fileName} ` : ''}has been downloaded to your device instead.`
-        );
-      } else {
-        alert(error.message || 'Unable to stop recording');
+        
+        if (userWantsDownload) {
+          const fileName = promptLocalDownload(
+            recordingResult.blob,
+            recordingResult.mimeType || recordingResult.blob.type || 'video/webm'
+          );
+          console.log(`Recording downloaded as backup: ${fileName}`);
+        }
       }
+      
+      // Try to stop recording on server even without video data
       try {
         await performRecordingAction('stop', { body: new FormData() });
       } catch (secondaryError) {
@@ -4857,10 +5099,11 @@
         if (sender && typeof sender.replaceTrack === 'function') {
           sender
             .replaceTrack(track)
+            .then(() => configureSenderParameters(sender, { track }))
             .catch((error) => console.warn('replaceTrack error', error));
         } else {
           try {
-            pc.addTrack(track, stream);
+            addConfiguredTrack(pc, track, stream);
           } catch (error) {
             console.warn('addTrack error', error);
           }
@@ -5125,6 +5368,13 @@
     state.pollHistory = state.classInfo.pollHistory || [];
     state.questions = state.classInfo.questions || [];
     state.recording = state.classInfo.recording || { isRecording: false, isPaused: false };
+    // Fallback: seed meeting startedAt if missing
+    if (!state.classInfo.startedAt) {
+      state.classInfo.startedAt = state.classInfo.startedAt || state.classInfo.startTime || state.classInfo.createdAt || new Date().toISOString();
+    }
+    // Initialize timers for meeting and recording
+    try { updateMeetingStartTime(); } catch (_) {}
+    try { updateRecordingTimer(); } catch (_) {}
     applyMediaState('host', state.classInfo.hostMediaState || { audio: false, video: false });
     (state.classInfo.participants || []).forEach((participant) => {
       applyMediaState(participant.token, participant.mediaState);
@@ -5733,6 +5983,34 @@
       applyRecordingPayload(payload);
     });
 
+    state.socket.on('upload:status', (payload) => {
+      if (!payload) return;
+      state.uploadStatus = payload.status;
+      if (payload.uploadUrl) {
+        state.classInfo.recordedVideoLink = payload.uploadUrl;
+        state.classInfo.recordingClassLink = payload.uploadUrl;
+      }
+      updateRecordingStatus();
+      
+      // Show notification for upload completion or failure
+      if (payload.status === 'completed') {
+        console.log('Video uploaded successfully:', payload.uploadUrl);
+      } else if (payload.status === 'failed') {
+        console.error('Video upload failed:', payload.error);
+        if (state.isHost) {
+          alert('Video upload failed: ' + (payload.message || payload.error || 'Unknown error'));
+        }
+      }
+    });
+
+    state.socket.on('recording:uploaded', (payload) => {
+      if (!payload) return;
+      state.classInfo.recordedVideoLink = payload.recordedVideoLink;
+      state.classInfo.recordingClassLink = payload.recordingClassLink;
+      state.uploadStatus = 'completed';
+      updateRecordingStatus();
+    });
+
     state.socket.on('webrtc:signal', handleSignal);
   };
 
@@ -5793,12 +6071,16 @@
     connectionWatchdog?.watchPeer(pc);
 
     if (state.isHost && state.localStream) {
-      state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
+      state.localStream.getTracks().forEach((track) => {
+        addConfiguredTrack(pc, track, state.localStream);
+      });
     }
     if (state.isHost && state.screenStream) {
       state.screenStream.getTracks().forEach((track) => {
-        const sender = pc.addTrack(track, state.screenStream);
-        state.screenSenders.push({ pc, sender, token: targetToken, track });
+        const sender = addConfiguredTrack(pc, track, state.screenStream, { isScreen: true });
+        if (sender) {
+          state.screenSenders.push({ pc, sender, token: targetToken, track });
+        }
       });
     }
 
@@ -5914,6 +6196,7 @@
     if (initiator) {
       setTimeout(async () => {
         try {
+          applyPreferredCodecs(pc);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           state.socket.emit('webrtc:signal', {
@@ -5933,6 +6216,7 @@
   const renegotiate = async (pc, targetToken, options = {}) => {
     try {
       const offerOptions = options.iceRestart ? { iceRestart: true } : {};
+      applyPreferredCodecs(pc);
       const offer = await pc.createOffer(offerOptions);
       await pc.setLocalDescription(offer);
       state.socket.emit('webrtc:signal', {
@@ -5961,8 +6245,11 @@
           await setupPreview();
         }
         if (state.localStream) {
-          state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
+          state.localStream.getTracks().forEach((track) => {
+            addConfiguredTrack(pc, track, state.localStream);
+          });
         }
+        applyPreferredCodecs(pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         state.socket.emit('webrtc:signal', {
@@ -7282,8 +7569,10 @@
       const tracks = displayStream.getTracks();
       state.peers.forEach((pc, token) => {
         tracks.forEach((track) => {
-          const sender = pc.addTrack(track, displayStream);
-          state.screenSenders.push({ pc, sender, token, track });
+          const sender = addConfiguredTrack(pc, track, displayStream, { isScreen: true });
+          if (sender) {
+            state.screenSenders.push({ pc, sender, token, track });
+          }
         });
         renegotiate(pc, token);
       });
@@ -7401,6 +7690,58 @@
       clearRejoinNeeded();
     }
   });
+
+  // Handle device changes - automatically switch to external camera when connected
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+    navigator.mediaDevices.addEventListener('devicechange', async () => {
+      try {
+        const previousCameras = state.availableCameras || [];
+        const currentCameras = await refreshAvailableCameras();
+        
+        // Check if a new camera was added
+        if (currentCameras.length > previousCameras.length) {
+          const newCameras = currentCameras.filter(cam => 
+            !previousCameras.some(prev => prev.deviceId === cam.deviceId)
+          );
+          
+          if (newCameras.length > 0 && state.localStream) {
+            // A new camera was connected - switch to it if video is enabled
+            const videoEnabled = isTrackEnabled('video');
+            if (videoEnabled) {
+              const newCamera = newCameras[0];
+              console.log('New camera detected:', newCamera.label || newCamera.deviceId);
+              
+              // Update preferred camera to the new device
+              state.preferredCamera = {
+                deviceId: newCamera.deviceId,
+                facingMode: null
+              };
+              
+              // Re-acquire stream with new camera
+              if (permissionManager) {
+                try {
+                  await permissionManager.acquireStream({ 
+                    audio: isTrackEnabled('audio'), 
+                    video: true, 
+                    replace: true 
+                  });
+                  showLiveToast(`Switched to ${newCamera.label || 'external camera'}`);
+                } catch (error) {
+                  console.error('Failed to switch to new camera:', error);
+                }
+              }
+            }
+          }
+        }
+        
+        // Update camera menu options
+        await updateQuickCameraButton(currentCameras).catch(() => {});
+        await syncCameraMenuOptions().catch(() => {});
+      } catch (error) {
+        console.warn('devicechange handler error:', error);
+      }
+    });
+  }
 
   const init = async () => {
     hideRejoinPrompt();

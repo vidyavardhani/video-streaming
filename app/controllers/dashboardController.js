@@ -13,6 +13,22 @@ exports.listUsers = async (req, res) => {
   }
 };
 
+exports.listInstitutes = async (req, res) => {
+  try {
+    // Get all unique institutes and locations
+    const institutes = await User.distinct('institute', { institute: { $ne: null, $ne: '' } });
+    const locations = await User.distinct('location', { location: { $ne: null, $ne: '' } });
+    
+    res.json({
+      institutes: institutes.sort(),
+      locations: locations.sort()
+    });
+  } catch (error) {
+    console.error('List institutes error', error);
+    res.status(500).json({ message: 'Unable to load institutes' });
+  }
+};
+
 exports.listLiveUsers = async (req, res) => {
   try {
     const liveClasses = await ClassModel.find({ status: 'live' }).populate('participants.user');

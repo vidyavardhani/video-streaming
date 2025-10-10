@@ -2287,9 +2287,13 @@ utility-panel {
 }
 
 .recording-status.active::before {
-  content: '●';
-  font-size: 0.65rem;
-  color: #f87171;
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f87171;
+  box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7);
+  animation: recording-pulse 1.5s infinite;
 }
 
 .recording-status.paused {
@@ -2300,6 +2304,50 @@ utility-panel {
   content: '⏸';
   font-size: 0.7rem;
   color: #93c5fd;
+}
+
+.recording-status.uploading {
+  color: #a5b4fc;
+}
+
+.recording-status.uploading::before {
+  content: '⬆';
+  font-size: 0.8rem;
+  color: #818cf8;
+  animation: upload-pulse 1.2s infinite;
+}
+
+.recording-status.uploaded {
+  color: #86efac;
+}
+
+.recording-status.uploaded::before {
+  content: '✓';
+  font-size: 0.9rem;
+  color: #34d399;
+}
+
+.recording-meta {
+  margin-top: 0.35rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.82rem;
+}
+
+.recording-timer {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes recording-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7); }
+  70% { box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+}
+
+@keyframes upload-pulse {
+  0%, 100% { opacity: 0.5; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
 }
 
 .recording-actions {
@@ -2318,6 +2366,35 @@ utility-panel {
 .recording-link {
   margin-top: 0.35rem;
   font-size: 0.82rem;
+}
+
+/* Header meters */
+.meeting-meters {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.meter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#meter-recording .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f87171;
+  box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7);
+  animation: recording-pulse 1.5s infinite;
 }
 
 .raised-hands {
@@ -3881,4 +3958,8 @@ footer.meeting-header-new.bottom {
 footer.meeting-controls
  {
     left: 0;
+}
+
+header.meeting-header {
+    display: none;
 }

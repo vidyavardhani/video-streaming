@@ -1,6 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { queueUpload, UploadStatus } = require('./uploadQueue');
 
 const region = process.env.AWS_REGION || 'us-east-1';
 const bucket = process.env.AWS_S3_BUCKET_NAME;
@@ -145,32 +146,79 @@ const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceho
 
   if (!providedBuffer || providedBuffer.length === 0) {
     if (!allowPlaceholder) {
+      console.error('Recording data missing for class:', klass.meetingCode);
       throw new Error('Recording data missing');
     }
+    console.warn('Recording stopped without data for class:', klass.meetingCode);
   }
 
-  const finalBuffer = providedBuffer && providedBuffer.length
-    ? providedBuffer
-    : Buffer.from('Recording unavailable');
+  // Only save recording link if we have valid data
+  if (providedBuffer && providedBuffer.length > 0) {
+    const extension = determineExtension(normalizedMime);
+    const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.${extension}`;
+    
+    try {
+      const parsedDuration = Number(durationMs);
+      
+      // Queue the upload instead of blocking
+      await queueUpload({
+        classId: klass._id.toString(),
+        meetingCode: klass.meetingCode,
+        fileKey,
+        buffer: providedBuffer,
+        mimeType: normalizedMime,
+        durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null
+      });
 
-  const extension = determineExtension(normalizedMime);
-  const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.${extension}`;
-  const link = await buildFinalLink(fileKey, finalBuffer, normalizedMime);
+      // Update recording status to indicate upload is queued
+      klass.recording = {
+        ...(klass.recording || {}),
+        isRecording: false,
+        isPaused: false,
+        pausedAt: null,
+        finishedAt: new Date(),
+        durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
+        fileKey,
+        uploadStatus: UploadStatus.QUEUED
+      };
 
-  const parsedDuration = Number(durationMs);
-
-  klass.recording = {
-    ...(klass.recording || {}),
-    isRecording: false,
-    isPaused: false,
-    pausedAt: null,
-    finishedAt: new Date(),
-    durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
-    fileKey
-  };
-  klass.recordedVideoLink = link;
-  klass.recordingClassLink = link;
-  return link;
+      // Return null initially - the actual link will be updated when upload completes
+      klass.recordedVideoLink = null;
+      klass.recordingClassLink = null;
+      
+      console.log(`Recording stopped and queued for upload: ${klass.meetingCode}`);
+      return { status: 'queued', message: 'Video upload queued' };
+    } catch (uploadError) {
+      console.error('Failed to queue recording upload:', uploadError);
+      // Still mark recording as stopped even if queueing fails
+      klass.recording = {
+        ...(klass.recording || {}),
+        isRecording: false,
+        isPaused: false,
+        pausedAt: null,
+        finishedAt: new Date(),
+        durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : klass.recording?.durationMs || null,
+        fileKey: null,
+        uploadStatus: UploadStatus.FAILED,
+        uploadError: uploadError.message
+      };
+      throw new Error('Failed to queue recording upload');
+    }
+  } else {
+    // No data provided but placeholder is allowed
+    klass.recording = {
+      ...(klass.recording || {}),
+      isRecording: false,
+      isPaused: false,
+      pausedAt: null,
+      finishedAt: new Date(),
+      durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : klass.recording?.durationMs || null,
+      fileKey: null
+    };
+    klass.recordedVideoLink = null;
+    klass.recordingClassLink = null;
+    return null;
+  }
 };
 
 module.exports = {

@@ -8,7 +8,7 @@ const TOKEN_COOKIE = 'vs_token';
 const signToken = (user) => {
   const payload = { id: user._id, role: user.role };
   const secret = process.env.JWT_SECRET || 'super-secret-key';
-  return jwt.sign(payload, secret, { expiresIn: '12h' });
+  return jwt.sign(payload, secret, { expiresIn: '1992h' });
 };
 
 const sendAuthResponse = (res, user, status = 200) => {
@@ -37,7 +37,7 @@ exports.register = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const { name, email, password, role } = req.body;
+  const { name, email, password, role, institute, location } = req.body;
 
   try {
     const existing = await User.findOne({ email });
@@ -46,7 +46,18 @@ exports.register = async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, email, password: hashed, role });
+    const userData = { 
+      name, 
+      email, 
+      password: hashed, 
+      role
+    };
+    
+    // Add optional fields if provided
+    if (institute) userData.institute = institute.trim();
+    if (location) userData.location = location.trim();
+    
+    const user = await User.create(userData);
     return sendAuthResponse(res, user, 201);
   } catch (error) {
     console.error('Register error', error);
@@ -95,6 +106,8 @@ exports.me = async (req, res) => {
     name: user.name,
     email: user.email,
     role: user.role,
+    institute: user.institute || null,
+    location: user.location || null,
     apiKey: user.apiKey || null
   });
 };
@@ -118,8 +131,8 @@ exports.updateProfile = async (req, res) => {
     return res.status(401).json({ message: 'Unauthenticated' });
   }
 
-  const { name, email, password } = req.body;
-  if (!name && !email && !password) {
+  const { name, email, password, institute, location } = req.body;
+  if (!name && !email && !password && !institute && !location) {
     return res.status(400).json({ message: 'Provide at least one field to update' });
   }
 
@@ -145,6 +158,14 @@ exports.updateProfile = async (req, res) => {
       user.password = await bcrypt.hash(password, 10);
     }
 
+    if (institute !== undefined) {
+      user.institute = institute ? institute.trim() : null;
+    }
+
+    if (location !== undefined) {
+      user.location = location ? location.trim() : null;
+    }
+
     await user.save();
 
     return res.json({
@@ -154,6 +175,8 @@ exports.updateProfile = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        institute: user.institute || null,
+        location: user.location || null,
         apiKey: user.apiKey || null
       }
     });

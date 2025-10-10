@@ -15,6 +15,7 @@ const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const registerSocketHandlers = require('./app/sockets');
+const { setSocketIO } = require('./app/services/uploadQueue');
 
 dotenv.config();
 
@@ -29,6 +30,9 @@ const io = require('socket.io')(server, {
 
 registerSocketHandlers(io);
 
+// Initialize upload queue with socket.io instance for progress updates
+setSocketIO(io);
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -39,7 +43,7 @@ app.set('views', path.join(__dirname, 'app/views'));
 app.set('view engine', 'ejs');
 app.use('/public', express.static(path.join(__dirname, 'app/public')));
 
-const mongoUri = process.env.MONGO_URI || 'mongodb+srv://abnjain25:HelloVVD1@cluster0.wewp9ek.mongodb.net/video-streaming';
+const mongoUri = process.env.MONGO_URI || 'mongodb+srv://abnjain25:HelloVVD1@cluster0.wewp9ek.mongodb.net/production';
 mongoose
   .connect(mongoUri)
   .then(() => console.log('Connected to MongoDB'))
@@ -118,12 +122,3 @@ const client = new S3Client({
   }
 });
 
-async function getLink() {
-  const command = new GetObjectCommand({
-    Bucket: "rapydlaunchbucket",
-    Key: "recordings/895-114-555/1759133434963.mp4"
-  });
-  const url = await getSignedUrl(client, command, { expiresIn: 3600 });
-  console.log("Pre-signed URL:", url);
-}
-getLink();
