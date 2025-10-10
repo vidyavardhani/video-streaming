@@ -132,10 +132,14 @@ const resumeRecording = async (klass) => {
   };
 };
 
-const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceholder = false } = {}) => {
+const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceholder = false, isRetry = false } = {}) => {
   if (!klass) return null;
   const classKey = klass._id.toString();
-  activeRecordings.delete(classKey);
+  
+  // Only delete from active recordings if this is not a retry
+  if (!isRetry) {
+    activeRecordings.delete(classKey);
+  }
 
   const normalizedMime = normalizeMimeType(mimeType);
   const providedBuffer = Buffer.isBuffer(buffer)
@@ -170,42 +174,59 @@ const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceho
         durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null
       });
 
-      // Update recording status to indicate upload is queued
-      klass.recording = {
-        ...(klass.recording || {}),
-        isRecording: false,
-        isPaused: false,
-        pausedAt: null,
-        finishedAt: new Date(),
-        durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
-        fileKey,
-        uploadStatus: UploadStatus.QUEUED
-      };
-
-      // Return null initially - the actual link will be updated when upload completes
-      klass.recordedVideoLink = null;
-      klass.recordingClassLink = null;
+      // Update recording status to indicate upload is queued (only if not a retry)
+      if (!isRetry) {
+        klass.recording = {
+          ...(klass.recording || {}),
+          isRecording: false,
+          isPaused: false,
+          pausedAt: null,
+          finishedAt: new Date(),
+          durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
+          fileKey,
+          uploadStatus: UploadStatus.QUEUED
+        };
+        
+        klass.recordedVideoLink = null;
+        klass.recordingClassLink = null;
+      } else {
+        // For retries, just update upload status
+        klass.recording = {
+          ...(klass.recording || {}),
+          fileKey,
+          uploadStatus: UploadStatus.QUEUED
+        };
+      }
       
-      console.log(`Recording stopped and queued for upload: ${klass.meetingCode}`);
+      console.log(`Recording ${isRetry ? 'retry' : ''} queued for upload: ${klass.meetingCode}`);
       return { status: 'queued', message: 'Video upload queued' };
     } catch (uploadError) {
       console.error('Failed to queue recording upload:', uploadError);
-      // Still mark recording as stopped even if queueing fails
-      klass.recording = {
-        ...(klass.recording || {}),
-        isRecording: false,
-        isPaused: false,
-        pausedAt: null,
-        finishedAt: new Date(),
-        durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : klass.recording?.durationMs || null,
-        fileKey: null,
-        uploadStatus: UploadStatus.FAILED,
-        uploadError: uploadError.message
-      };
+      // Still mark recording as stopped even if queueing fails (only if not a retry)
+      if (!isRetry) {
+        klass.recording = {
+          ...(klass.recording || {}),
+          isRecording: false,
+          isPaused: false,
+          pausedAt: null,
+          finishedAt: new Date(),
+          durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : klass.recording?.durationMs || null,
+          fileKey: null,
+          uploadStatus: UploadStatus.FAILED,
+          uploadError: uploadError.message
+        };
+      } else {
+        // For retries, just update upload status
+        klass.recording = {
+          ...(klass.recording || {}),
+          uploadStatus: UploadStatus.FAILED,
+          uploadError: uploadError.message
+        };
+      }
       throw new Error('Failed to queue recording upload');
     }
-  } else {
-    // No data provided but placeholder is allowed
+  } else if (!isRetry) {
+    // No data provided but placeholder is allowed (only update state if not a retry)
     klass.recording = {
       ...(klass.recording || {}),
       isRecording: false,

@@ -360,13 +360,27 @@ exports.stopRecording = async (req, res) => {
     if (!hostContext.isHost) {
       return res.status(403).json({ message: 'Only host can stop recording' });
     }
-    if (!klass.recording?.isRecording) {
-      return res.status(400).json({ message: 'Recording not active' });
-    }
 
     const uploadedFile = req.file || null;
     const mimeType = uploadedFile?.mimetype || req.body?.mimeType || null;
     const durationMs = req.body?.durationMs;
+
+    // Allow upload even if recording is already stopped (for retry attempts from IndexedDB)
+    const isActiveRecording = klass.recording?.isRecording;
+    
+    if (!isActiveRecording && !uploadedFile) {
+      // Only reject if no recording is active AND no video data is provided
+      return res.status(400).json({ message: 'Recording not active and no video data provided' });
+    }
+
+    if (!isActiveRecording && uploadedFile) {
+      // This is a retry/background upload attempt - log it
+      console.log('Background upload retry for already stopped recording', {
+        meetingCode: klass.meetingCode,
+        fileSize: uploadedFile?.size,
+        attempts: req.body?.attempts || 'unknown'
+      });
+    }
 
     if (!uploadedFile) {
       console.warn('Recording stop received without file payload', {
@@ -379,7 +393,8 @@ exports.stopRecording = async (req, res) => {
       buffer: uploadedFile?.buffer || null,
       mimeType,
       durationMs,
-      allowPlaceholder: !uploadedFile
+      allowPlaceholder: !uploadedFile,
+      isRetry: !isActiveRecording && uploadedFile // Flag retry attempts
     });
     await klass.save();
 
