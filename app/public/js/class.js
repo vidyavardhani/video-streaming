@@ -3899,11 +3899,26 @@
   const performRecordingAction = async (action, { body = null, headers: customHeaders = {} } = {}) => {
     if (!state.isHost) return null;
     try {
-      const options = { method: 'POST' };
+      const options = { 
+        method: 'POST',
+        // Add timeout for better browser compatibility
+        signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined // 60s timeout
+      };
+      
       if (body instanceof FormData) {
         options.body = body;
+        // Don't set Content-Type for FormData - browser will set it with boundary
         if (customHeaders && Object.keys(customHeaders).length) {
-          options.headers = customHeaders;
+          // Only add custom headers that aren't Content-Type
+          const filtered = {};
+          Object.keys(customHeaders).forEach(key => {
+            if (key.toLowerCase() !== 'content-type') {
+              filtered[key] = customHeaders[key];
+            }
+          });
+          if (Object.keys(filtered).length) {
+            options.headers = filtered;
+          }
         }
       } else if (body) {
         const payload = typeof body === 'string' ? body : JSON.stringify(body);
@@ -3913,6 +3928,7 @@
         options.body = JSON.stringify({});
         options.headers = { 'Content-Type': 'application/json', ...customHeaders };
       }
+      
       const res = await fetch(`/classes/${classCode}/recording/${action}`, applyHostAuth(options));
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
@@ -3926,7 +3942,17 @@
       applyRecordingPayload(data);
       return data;
     } catch (error) {
-      alert(error.message || `Unable to ${action} recording`);
+      console.error(`performRecordingAction(${action}) failed:`, error);
+      
+      // Don't show alert for network errors during retry attempts
+      if (!error.message?.includes('retry')) {
+        if (action === 'stop') {
+          // For stop action, we'll retry - don't alert yet
+          console.log('Upload failed, will retry...');
+        } else {
+          alert(error.message || `Unable to ${action} recording`);
+        }
+      }
       throw error;
     } finally {
       registerOverlayInteraction({ autoHide: true });
@@ -3987,54 +4013,106 @@
         alert(error.message || 'Unable to finalize recording');
       }
     }
+    
+    // ALWAYS try to upload - NEVER download automatically
+    let uploadAttempted = false;
+    let uploadSuccess = false;
+    
+    // Detect browser/WebView for better compatibility
+    const userAgent = navigator.userAgent || '';
+    const isWebView = /wv|WebView/i.test(userAgent);
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(userAgent);
+    
+    console.log('Browser info:', { isWebView, isMobile, userAgent: userAgent.substring(0, 100) });
+    
     try {
       const formData = new FormData();
       if (recordingResult?.blob && recordingResult.blob.size) {
         const mime = recordingResult.mimeType || recordingResult.blob.type || 'video/webm';
         const fileName = buildRecordingFileName(mime);
+        
+        console.log('Preparing upload:', { 
+          fileName, 
+          mime, 
+          size: recordingResult.blob.size,
+          duration: recordingResult.durationMs 
+        });
+        
         formData.append('recording', recordingResult.blob, fileName);
         formData.append('mimeType', mime);
         if (recordingResult.durationMs) {
           formData.append('durationMs', String(recordingResult.durationMs));
         }
         formData.append('size', String(recordingResult.blob.size));
+        
+        // Add browser info for debugging on server
+        formData.append('browserInfo', JSON.stringify({ isWebView, isMobile }));
       }
+      
+      uploadAttempted = true;
+      console.log('Attempting upload to server...');
       const response = await performRecordingAction('stop', { body: formData });
       
       // Check if upload was queued successfully
-      if (response?.uploadStatus === 'queued') {
-        console.log('Recording queued for upload');
-        // Don't download - let the queue handle it
+      if (response?.uploadStatus === 'queued' || response?.uploadStatus === 'uploading') {
+        console.log('✅ Recording queued for upload successfully');
+        uploadSuccess = true;
       }
     } catch (error) {
       console.error('stopRecordingSession error', error);
       
-      // Only download if queueing completely failed AND we have the blob
-      // This is a last resort - the queue system should handle retries
-      const shouldDownload = recordingResult?.blob && 
-                            error.message && 
-                            (error.message.includes('Network') || error.message.includes('Failed to fetch'));
-      
-      if (shouldDownload) {
-        // Ask user before downloading
-        const userWantsDownload = confirm(
-          'Unable to queue video for upload. Would you like to download the recording to your device as a backup?'
-        );
+      // FORCE RETRY: If initial upload fails, keep trying with exponential backoff
+      if (recordingResult?.blob && !uploadSuccess) {
+        console.log('Initial upload failed, scheduling retry...');
         
-        if (userWantsDownload) {
-          const fileName = promptLocalDownload(
-            recordingResult.blob,
-            recordingResult.mimeType || recordingResult.blob.type || 'video/webm'
-          );
-          console.log(`Recording downloaded as backup: ${fileName}`);
-        }
+        // Store blob for retry attempts
+        const retryUpload = async (attempt = 1, maxAttempts = 5) => {
+          if (attempt > maxAttempts) {
+            console.error('All upload retry attempts failed');
+            alert('Unable to upload recording after multiple attempts. Please check your connection and try refreshing the page.');
+            return;
+          }
+          
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Exponential backoff, max 10s
+          console.log(`Retry attempt ${attempt}/${maxAttempts} in ${delay}ms...`);
+          
+          await new Promise(resolve => setTimeout(resolve, delay));
+          
+          try {
+            const formData = new FormData();
+            const mime = recordingResult.mimeType || recordingResult.blob.type || 'video/webm';
+            const fileName = buildRecordingFileName(mime);
+            formData.append('recording', recordingResult.blob, fileName);
+            formData.append('mimeType', mime);
+            if (recordingResult.durationMs) {
+              formData.append('durationMs', String(recordingResult.durationMs));
+            }
+            formData.append('size', String(recordingResult.blob.size));
+            
+            const response = await performRecordingAction('stop', { body: formData });
+            
+            if (response?.uploadStatus === 'queued' || response?.uploadStatus === 'uploading') {
+              console.log(`Upload successful on retry attempt ${attempt}`);
+              return;
+            }
+          } catch (retryError) {
+            console.error(`Retry attempt ${attempt} failed:`, retryError);
+            // Continue to next retry
+            await retryUpload(attempt + 1, maxAttempts);
+          }
+        };
+        
+        // Start retry sequence in background
+        retryUpload().catch(err => console.error('Retry sequence failed:', err));
       }
       
       // Try to stop recording on server even without video data
-      try {
-        await performRecordingAction('stop', { body: new FormData() });
-      } catch (secondaryError) {
-        console.error('Secondary stop attempt failed', secondaryError);
+      if (!uploadAttempted) {
+        try {
+          await performRecordingAction('stop', { body: new FormData() });
+        } catch (secondaryError) {
+          console.error('Secondary stop attempt failed', secondaryError);
+        }
       }
     } finally {
       state.recordingUploadPending = false;
