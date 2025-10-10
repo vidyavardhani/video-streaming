@@ -1,6 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { queueUpload, UploadStatus } = require('./uploadQueue');
 
 const region = process.env.AWS_REGION || 'us-east-1';
 const bucket = process.env.AWS_S3_BUCKET_NAME;
@@ -157,10 +158,19 @@ const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceho
     const fileKey = `recordings/${klass.meetingCode}/${Date.now()}.${extension}`;
     
     try {
-      const link = await buildFinalLink(fileKey, providedBuffer, normalizedMime);
-      
       const parsedDuration = Number(durationMs);
       
+      // Queue the upload instead of blocking
+      await queueUpload({
+        classId: klass._id.toString(),
+        meetingCode: klass.meetingCode,
+        fileKey,
+        buffer: providedBuffer,
+        mimeType: normalizedMime,
+        durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null
+      });
+
+      // Update recording status to indicate upload is queued
       klass.recording = {
         ...(klass.recording || {}),
         isRecording: false,
@@ -168,14 +178,19 @@ const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceho
         pausedAt: null,
         finishedAt: new Date(),
         durationMs: Number.isFinite(parsedDuration) ? parsedDuration : klass.recording?.durationMs || null,
-        fileKey
+        fileKey,
+        uploadStatus: UploadStatus.QUEUED
       };
-      klass.recordedVideoLink = link;
-      klass.recordingClassLink = link;
-      return link;
+
+      // Return null initially - the actual link will be updated when upload completes
+      klass.recordedVideoLink = null;
+      klass.recordingClassLink = null;
+      
+      console.log(`Recording stopped and queued for upload: ${klass.meetingCode}`);
+      return { status: 'queued', message: 'Video upload queued' };
     } catch (uploadError) {
-      console.error('Failed to upload recording:', uploadError);
-      // Still mark recording as stopped even if upload fails
+      console.error('Failed to queue recording upload:', uploadError);
+      // Still mark recording as stopped even if queueing fails
       klass.recording = {
         ...(klass.recording || {}),
         isRecording: false,
@@ -183,9 +198,11 @@ const stopRecording = async (klass, { buffer, mimeType, durationMs, allowPlaceho
         pausedAt: null,
         finishedAt: new Date(),
         durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : klass.recording?.durationMs || null,
-        fileKey: null
+        fileKey: null,
+        uploadStatus: UploadStatus.FAILED,
+        uploadError: uploadError.message
       };
-      throw new Error('Failed to save recording');
+      throw new Error('Failed to queue recording upload');
     }
   } else {
     // No data provided but placeholder is allowed

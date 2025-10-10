@@ -15,6 +15,7 @@ const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const registerSocketHandlers = require('./app/sockets');
+const { setSocketIO } = require('./app/services/uploadQueue');
 
 dotenv.config();
 
@@ -28,6 +29,9 @@ const io = require('socket.io')(server, {
 });
 
 registerSocketHandlers(io);
+
+// Initialize upload queue with socket.io instance for progress updates
+setSocketIO(io);
 
 app.use(cors());
 app.use(express.json());

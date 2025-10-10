@@ -2306,6 +2306,27 @@ utility-panel {
   color: #93c5fd;
 }
 
+.recording-status.uploading {
+  color: #a5b4fc;
+}
+
+.recording-status.uploading::before {
+  content: '⬆';
+  font-size: 0.8rem;
+  color: #818cf8;
+  animation: upload-pulse 1.2s infinite;
+}
+
+.recording-status.uploaded {
+  color: #86efac;
+}
+
+.recording-status.uploaded::before {
+  content: '✓';
+  font-size: 0.9rem;
+  color: #34d399;
+}
+
 .recording-meta {
   margin-top: 0.35rem;
   display: flex;
@@ -2322,6 +2343,11 @@ utility-panel {
   0% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7); }
   70% { box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); }
   100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+}
+
+@keyframes upload-pulse {
+  0%, 100% { opacity: 0.5; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
 }
 
 .recording-actions {

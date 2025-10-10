@@ -375,7 +375,7 @@ exports.stopRecording = async (req, res) => {
       });
     }
 
-    const link = await recordingService.stopRecording(klass, {
+    const result = await recordingService.stopRecording(klass, {
       buffer: uploadedFile?.buffer || null,
       mimeType,
       durationMs,
@@ -383,15 +383,21 @@ exports.stopRecording = async (req, res) => {
     });
     await klass.save();
 
+    // Emit initial recording status (with queued upload)
     getIO().to(klass.meetingCode).emit('recording:status', {
       recording: klass.recording,
       recordedVideoLink: klass.recordedVideoLink,
-      recordingClassLink: klass.recordingClassLink
+      recordingClassLink: klass.recordingClassLink,
+      uploadStatus: klass.recording?.uploadStatus || null
     });
+
+    // Return response indicating upload is queued
     return res.json({
       recording: klass.recording,
-      recordedVideoLink: link,
-      recordingClassLink: klass.recordingClassLink
+      recordedVideoLink: klass.recordedVideoLink,
+      recordingClassLink: klass.recordingClassLink,
+      uploadStatus: klass.recording?.uploadStatus || null,
+      message: result?.message || 'Recording stopped'
     });
   } catch (error) {
     console.error('stopRecording error', error);

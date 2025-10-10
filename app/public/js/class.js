@@ -3729,13 +3729,24 @@
     const isRecording = !!state.recording?.isRecording;
     const isPaused = !!state.recording?.isPaused;
     const pending = !!state.recordingUploadPending;
+    const uploadStatus = state.uploadStatus || state.recording?.uploadStatus;
     let statusText = 'Recording inactive';
     if (isRecording) {
       statusText = isPaused ? 'Recording paused' : 'Recording in progress…';
+    } else if (uploadStatus === 'queued') {
+      statusText = 'Video upload queued...';
+    } else if (uploadStatus === 'uploading') {
+      statusText = 'Uploading video to server...';
+    } else if (uploadStatus === 'completed') {
+      statusText = 'Video uploaded successfully';
+    } else if (uploadStatus === 'failed') {
+      statusText = 'Video upload failed';
     }
     elements.recordingStatus.textContent = statusText;
     elements.recordingStatus.classList.toggle('active', isRecording && !isPaused);
     elements.recordingStatus.classList.toggle('paused', isPaused);
+    elements.recordingStatus.classList.toggle('uploading', uploadStatus === 'uploading' || uploadStatus === 'queued');
+    elements.recordingStatus.classList.toggle('uploaded', uploadStatus === 'completed');
     if (elements.recordingStart) {
       elements.recordingStart.classList.toggle('hidden', !state.isHost || isRecording);
       elements.recordingStart.disabled = pending || !state.isHost || isRecording;
@@ -3804,6 +3815,9 @@
     }
     if (Object.prototype.hasOwnProperty.call(payload, 'recordingClassLink')) {
       state.classInfo.recordingClassLink = payload.recordingClassLink;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'uploadStatus')) {
+      state.uploadStatus = payload.uploadStatus;
     }
     updateRecordingStatus();
     syncRecordingManager(state.recording);
@@ -5942,6 +5956,34 @@
 
     state.socket.on('recording:status', (payload) => {
       applyRecordingPayload(payload);
+    });
+
+    state.socket.on('upload:status', (payload) => {
+      if (!payload) return;
+      state.uploadStatus = payload.status;
+      if (payload.uploadUrl) {
+        state.classInfo.recordedVideoLink = payload.uploadUrl;
+        state.classInfo.recordingClassLink = payload.uploadUrl;
+      }
+      updateRecordingStatus();
+      
+      // Show notification for upload completion or failure
+      if (payload.status === 'completed') {
+        console.log('Video uploaded successfully:', payload.uploadUrl);
+      } else if (payload.status === 'failed') {
+        console.error('Video upload failed:', payload.error);
+        if (state.isHost) {
+          alert('Video upload failed: ' + (payload.message || payload.error || 'Unknown error'));
+        }
+      }
+    });
+
+    state.socket.on('recording:uploaded', (payload) => {
+      if (!payload) return;
+      state.classInfo.recordedVideoLink = payload.recordedVideoLink;
+      state.classInfo.recordingClassLink = payload.recordingClassLink;
+      state.uploadStatus = 'completed';
+      updateRecordingStatus();
     });
 
     state.socket.on('webrtc:signal', handleSignal);

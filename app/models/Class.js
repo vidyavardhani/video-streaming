@@ -266,7 +266,15 @@ const classSchema = new mongoose.Schema({
     },
     startedAt: Date,
     pausedAt: Date,
-    fileKey: String
+    finishedAt: Date,
+    durationMs: Number,
+    fileKey: String,
+    uploadStatus: {
+      type: String,
+      enum: ['queued', 'uploading', 'completed', 'failed']
+    },
+    uploadedAt: Date,
+    uploadError: String
   },
   recordedVideoLink: String,
   recordingClassLink: String,
