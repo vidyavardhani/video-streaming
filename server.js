@@ -34,8 +34,8 @@ registerSocketHandlers(io);
 setSocketIO(io);
 
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '5gb' })); // Allow large JSON payloads
+app.use(express.urlencoded({ extended: true, limit: '5gb' })); // Allow large form data
 app.use(cookieParser());
 app.use(morgan('dev'));
 
