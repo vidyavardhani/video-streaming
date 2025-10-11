@@ -12,4 +12,22 @@
 ✅ RecordingService S3 Client configured: Bucket=rapydlaunchbucket, Region=ap-southeast-2
 Server listening on port 4000
 Connected to MongoDB
-[0mGET / [32m200[0m 18.267 ms - 1408[0m
+[0mGET / [32m200[0m 8.066 ms - 1408[0m
+[0mGET / [32m200[0m 4.581 ms - 1408[0m
+[0mGET /public/css/style.css [32m200[0m 6.465 ms - 76084[0m
+[0mGET /public/js/auth.js [36m304[0m 0.725 ms - -[0m
+[0mGET /favicon.ico [33m404[0m 8.238 ms - 150[0m
+[0mPOST /auth/login [32m200[0m 151.487 ms - 317[0m
+[0mGET /dashboard [32m200[0m 32.126 ms - 11811[0m
+[0mGET /public/css/style.css [36m304[0m 4.204 ms - -[0m
+[0mGET /public/js/developerPanel.js [36m304[0m 1.767 ms - -[0m
+[0mGET /public/js/dashboard.js [32m200[0m 2.702 ms - 27191[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [32m200[0m 59.786 ms - 23[0m
+[0mGET /auth/me [36m304[0m 62.424 ms - -[0m
+[0mGET /classes/mine [32m200[0m 127.442 ms - 47229[0m
+[0mGET /api/developer/summary [32m200[0m 119.267 ms - 7906[0m
+[0mPOST /classes [32m201[0m 183.142 ms - 465[0m
+[0mGET /classes/mine [32m200[0m 142.687 ms - 48289[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 70.372 ms - -[0m

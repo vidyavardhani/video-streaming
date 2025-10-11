@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
   <title>Live Class</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,6 +13,21 @@
   <link rel="stylesheet" href="/public/css/style.css">
 </head>
 <body>
+  <!-- Rotate Device Overlay for Mobile Portrait Mode -->
+  <div id="rotate-device-overlay" class="rotate-overlay hidden">
+    <div class="rotate-content">
+      <div class="rotate-icon">
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+          <rect x="15" y="25" width="50" height="30" rx="4" stroke="currentColor" stroke-width="3" fill="none"/>
+          <path d="M25 35h30M25 45h30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M50 30l8 8-8 8" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h2>Please Rotate Your Device</h2>
+      <p>For the best experience, please use landscape mode</p>
+    </div>
+  </div>
+
   <div
     id="class-app"
     data-class-code="<%= classCode %>"

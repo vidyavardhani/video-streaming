@@ -4697,9 +4697,28 @@
     if (typeof window === 'undefined') {
       return 'landscape';
     }
+    
     const docEl = typeof document !== 'undefined' ? document.documentElement : null;
     const width = window.innerWidth || docEl?.clientWidth || 0;
     const height = window.innerHeight || docEl?.clientHeight || 0;
+    
+    // FORCE LANDSCAPE ON MOBILE DEVICES
+    if (isMobileDevice()) {
+      // Show/hide rotate overlay based on orientation
+      const isPortraitOrientation = height > width;
+      const rotateOverlay = document.getElementById('rotate-device-overlay');
+      if (rotateOverlay) {
+        if (isPortraitOrientation) {
+          rotateOverlay.classList.remove('hidden');
+          console.log('📱 Mobile in portrait mode - showing rotate prompt');
+        } else {
+          rotateOverlay.classList.add('hidden');
+        }
+      }
+      // Always use landscape layout for mobile
+      return 'landscape';
+    }
+    
     if (!width) {
       return 'landscape';
     }
