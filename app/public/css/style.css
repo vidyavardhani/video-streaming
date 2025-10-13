@@ -1702,6 +1702,55 @@ body.is-student .host-only {
   flex-wrap: wrap;
 }
 
+/* Hide control buttons by default during meeting, show only three-dot menu */
+.meeting-shell .control-dock .control-btn:not(#control-more) {
+  opacity: 0;
+  transform: scale(0.5);
+  pointer-events: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Show all buttons when three-dot menu is active */
+.meeting-shell.controls-expanded .control-dock .control-btn {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+/* Ensure three-dot menu button is always visible */
+.meeting-shell .control-dock #control-more {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+/* Make three-dot menu button more prominent when it's the only visible control */
+.meeting-shell:not(.controls-expanded) .control-dock #control-more {
+  animation: subtle-pulse 2s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+}
+
+@keyframes subtle-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0);
+  }
+}
+
+/* Make control bar more compact when only three-dot menu is visible */
+.meeting-shell:not(.controls-expanded) .meeting-controls .control-bar {
+  padding: 0.6rem 1rem;
+  transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Expand control bar when controls are shown */
+.meeting-shell.controls-expanded .meeting-controls .control-bar {
+  padding: 0.75rem 1.85rem;
+  transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 
 .control-more-menu {
   position: fixed;

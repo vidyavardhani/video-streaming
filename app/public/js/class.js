@@ -7221,6 +7221,9 @@
     menu.classList.remove('open');
     menu.setAttribute('aria-hidden', 'true');
     elements.controlMore?.setAttribute('aria-expanded', 'false');
+    elements.controlMore?.classList.remove('menu-open');
+    // Hide all control buttons except three-dot menu
+    document.querySelector('.meeting-shell')?.classList.remove('controls-expanded');
     menu.removeEventListener('keydown', handleMoreMenuKeydown);
     if (typeof state.moreMenuFocusCleanup === 'function') {
       state.moreMenuFocusCleanup();
@@ -7238,6 +7241,9 @@
     menu.setAttribute('aria-hidden', 'false');
     state.moreMenuOpen = true;
     elements.controlMore?.setAttribute('aria-expanded', 'true');
+    elements.controlMore?.classList.add('menu-open');
+    // Show all control buttons when menu is opened
+    document.querySelector('.meeting-shell')?.classList.add('controls-expanded');
     menu.addEventListener('keydown', handleMoreMenuKeydown);
     requestAnimationFrame(() => {
       if (!state.moreMenuOpen) return;
