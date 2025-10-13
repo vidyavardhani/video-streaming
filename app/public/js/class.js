@@ -7221,9 +7221,6 @@
     menu.classList.remove('open');
     menu.setAttribute('aria-hidden', 'true');
     elements.controlMore?.setAttribute('aria-expanded', 'false');
-    elements.controlMore?.classList.remove('menu-open');
-    // Hide all control buttons except three-dot menu
-    document.querySelector('.meeting-shell')?.classList.remove('controls-expanded');
     menu.removeEventListener('keydown', handleMoreMenuKeydown);
     if (typeof state.moreMenuFocusCleanup === 'function') {
       state.moreMenuFocusCleanup();
@@ -7241,9 +7238,6 @@
     menu.setAttribute('aria-hidden', 'false');
     state.moreMenuOpen = true;
     elements.controlMore?.setAttribute('aria-expanded', 'true');
-    elements.controlMore?.classList.add('menu-open');
-    // Show all control buttons when menu is opened
-    document.querySelector('.meeting-shell')?.classList.add('controls-expanded');
     menu.addEventListener('keydown', handleMoreMenuKeydown);
     requestAnimationFrame(() => {
       if (!state.moreMenuOpen) return;
@@ -7761,6 +7755,108 @@
         controlCenter.setConversation(null, []);
       }
     }
+    
+    // Initialize mobile menu
+    initializeMobileMenu();
+  };
+
+  const initializeMobileMenu = () => {
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    const mobileMenuClose = document.getElementById('mobile-menu-close');
+    const mobileControlsMenu = document.getElementById('mobile-controls-menu');
+    const mobileMenuBackdrop = document.getElementById('mobile-menu-backdrop');
+    const mobileMenuGrid = document.getElementById('mobile-menu-grid');
+    const controlDock = document.getElementById('control-dock');
+
+    if (!mobileMenuBtn || !mobileControlsMenu || !mobileMenuGrid || !controlDock) return;
+
+    // Button labels mapping
+    const buttonLabels = {
+      'live-mic-toggle': 'Microphone',
+      'viewer-mic-toggle': 'Microphone',
+      'live-camera-toggle': 'Camera',
+      'viewer-camera-toggle': 'Camera',
+      'toggle-chat': 'Chat',
+      'hand-raise-btn': 'Raise Hand',
+      'toggle-participants': 'Participants',
+      'quick-record': 'Record',
+      'screen-share': 'Share Screen',
+      'end-btn': 'End Class',
+      'control-more': 'More Options'
+    };
+
+    // Clone control buttons to mobile menu
+    const cloneControlsToMobileMenu = () => {
+      mobileMenuGrid.innerHTML = '';
+      
+      const buttons = controlDock.querySelectorAll('.control-btn');
+      buttons.forEach(button => {
+        // Skip if hidden by role
+        if (button.classList.contains('host-only') && !state.isHost) return;
+        if (button.classList.contains('student-only') && state.isHost) return;
+        
+        const clone = button.cloneNode(true);
+        const label = buttonLabels[button.id] || button.getAttribute('aria-label') || 'Control';
+        
+        // Add label text
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'control-label';
+        labelSpan.textContent = label;
+        clone.appendChild(labelSpan);
+        
+        // Copy event listeners by re-attaching them
+        clone.addEventListener('click', (e) => {
+          e.preventDefault();
+          button.click();
+          
+          // Close menu instantly after any action so user can see the result
+          closeMobileMenu();
+        });
+        
+        mobileMenuGrid.appendChild(clone);
+      });
+    };
+
+    // Open mobile menu (only on mobile devices)
+    const openMobileMenu = () => {
+      // Only open menu on mobile (screen width <= 768px)
+      if (window.innerWidth > 768) {
+        return; // Do nothing on desktop
+      }
+      
+      cloneControlsToMobileMenu();
+      mobileControlsMenu?.classList.remove('hidden');
+      mobileMenuBackdrop?.classList.remove('hidden');
+      mobileMenuBtn?.setAttribute('aria-expanded', 'true');
+      document.body.classList.add('no-scroll');
+    };
+
+    // Close mobile menu
+    const closeMobileMenu = () => {
+      mobileControlsMenu?.classList.add('hidden');
+      mobileMenuBackdrop?.classList.add('hidden');
+      mobileMenuBtn?.setAttribute('aria-expanded', 'false');
+      document.body.classList.remove('no-scroll');
+    };
+
+    // Event listeners
+    mobileMenuBtn.addEventListener('click', openMobileMenu);
+    mobileMenuClose?.addEventListener('click', closeMobileMenu);
+    mobileMenuBackdrop?.addEventListener('click', closeMobileMenu);
+    
+    // Close on escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !mobileControlsMenu?.classList.contains('hidden')) {
+        closeMobileMenu();
+      }
+    });
+
+    // Store functions for later use
+    window.mobileMenuHelpers = {
+      open: openMobileMenu,
+      close: closeMobileMenu,
+      refresh: cloneControlsToMobileMenu
+    };
   };
 
   const muteLocalTracks = () => {
