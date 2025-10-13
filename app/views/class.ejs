@@ -246,7 +246,18 @@
           </div>
         </div>
         <footer class="meeting-controls">
-          <div class="control-bar">
+          <!-- Mobile Menu Toggle Button (Three Dots) -->
+          <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-label="Toggle menu" aria-expanded="false">
+            <span class="icon">
+              <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                <circle cx="12" cy="5" r="2" fill="currentColor"></circle>
+                <circle cx="12" cy="12" r="2" fill="currentColor"></circle>
+                <circle cx="12" cy="19" r="2" fill="currentColor"></circle>
+              </svg>
+            </span>
+          </button>
+          
+          <div class="control-bar" id="control-bar">
             <div class="control-dock" id="control-dock">
               <button id="live-mic-toggle" class="control-btn host-only" type="button" aria-label="Toggle microphone" aria-pressed="true" data-tooltip="Mic">
                 <span class="icon">

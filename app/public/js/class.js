@@ -7141,6 +7141,88 @@
   document.addEventListener('mozfullscreenchange', handleFullscreenChange);
   document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 
+  // Mobile menu toggle functionality
+  const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+  const controlBar = document.getElementById('control-bar');
+  const meetingControls = document.querySelector('.meeting-controls');
+  
+  let mobileMenuOpen = false;
+
+  const toggleMobileMenu = () => {
+    mobileMenuOpen = !mobileMenuOpen;
+    
+    if (mobileMenuOpen) {
+      // Open menu
+      controlBar?.classList.add('mobile-menu-open');
+      mobileMenuToggle?.classList.add('active');
+      mobileMenuToggle?.setAttribute('aria-expanded', 'true');
+      meetingControls?.classList.add('menu-active');
+      console.log('📱 Mobile menu opened');
+    } else {
+      // Close menu
+      controlBar?.classList.remove('mobile-menu-open');
+      mobileMenuToggle?.classList.remove('active');
+      mobileMenuToggle?.setAttribute('aria-expanded', 'false');
+      meetingControls?.classList.remove('menu-active');
+      console.log('📱 Mobile menu closed');
+    }
+  };
+
+  const closeMobileMenu = () => {
+    if (mobileMenuOpen) {
+      mobileMenuOpen = false;
+      controlBar?.classList.remove('mobile-menu-open');
+      mobileMenuToggle?.classList.remove('active');
+      mobileMenuToggle?.setAttribute('aria-expanded', 'false');
+      meetingControls?.classList.remove('menu-active');
+      console.log('📱 Mobile menu closed');
+    }
+  };
+
+  // Toggle menu on button click
+  mobileMenuToggle?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMobileMenu();
+  });
+
+  // Close menu when clicking on backdrop
+  if (meetingControls) {
+    meetingControls.addEventListener('click', (e) => {
+      if (e.target === meetingControls && mobileMenuOpen) {
+        closeMobileMenu();
+      }
+    });
+  }
+
+  // Close menu when clicking any control button
+  const controlButtons = document.querySelectorAll('.control-btn');
+  controlButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      // Close mobile menu after a short delay to allow the action to complete
+      setTimeout(() => {
+        closeMobileMenu();
+      }, 300);
+    });
+  });
+
+  // Close menu on ESC key (mobile devices with keyboard)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && mobileMenuOpen) {
+      closeMobileMenu();
+    }
+  });
+
+  // Auto-hide mobile menu on orientation change to landscape (fullscreen)
+  const originalHandleOrientationChange = handleOrientationChange;
+  handleOrientationChange = async function() {
+    // Close mobile menu when rotating
+    closeMobileMenu();
+    // Call original function
+    if (typeof originalHandleOrientationChange === 'function') {
+      await originalHandleOrientationChange();
+    }
+  };
+
   elements.chatForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = elements.chatInput.value.trim();

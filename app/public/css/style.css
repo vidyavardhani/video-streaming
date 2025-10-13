@@ -4102,6 +4102,130 @@ header.meeting-header {
     display: none;
 }
 
+/* Mobile Menu Toggle Button (Three Dots) */
+.mobile-menu-toggle {
+  display: none;
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
+  right: 1.5rem;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(17, 18, 28, 0.85);
+  color: rgba(248, 250, 252, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 24px 44px rgba(5, 6, 15, 0.55);
+  z-index: 85;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  cursor: pointer;
+}
+
+.mobile-menu-toggle .icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.mobile-menu-toggle .icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.mobile-menu-toggle:hover {
+  transform: scale(1.05);
+  box-shadow: 0 30px 52px rgba(5, 6, 15, 0.65);
+  background: rgba(24, 26, 40, 0.9);
+}
+
+.mobile-menu-toggle:active {
+  transform: scale(0.95);
+}
+
+.mobile-menu-toggle.active {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 32px 64px rgba(99, 102, 241, 0.45);
+}
+
+/* Hide mobile toggle on desktop */
+@media (min-width: 721px) {
+  .mobile-menu-toggle {
+    display: none !important;
+  }
+}
+
+/* Show mobile toggle on mobile screens */
+@media (max-width: 720px) {
+  .mobile-menu-toggle {
+    display: flex;
+  }
+
+  /* Hide control bar by default on mobile */
+  .meeting-controls .control-bar {
+    opacity: 0;
+    transform: translateY(100%);
+    pointer-events: none;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  /* Show control bar when menu is open */
+  .meeting-controls .control-bar.mobile-menu-open {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  /* Add backdrop when menu is open */
+  .meeting-controls::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 6, 11, 0.75);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 79;
+  }
+
+  .meeting-controls.menu-active::before {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .mobile-menu-toggle {
+    width: 52px;
+    height: 52px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+    right: 1.25rem;
+  }
+
+  .mobile-menu-toggle .icon svg {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+@media (max-width: 420px) {
+  .mobile-menu-toggle {
+    width: 48px;
+    height: 48px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 0.85rem);
+    right: 1rem;
+  }
+
+  .mobile-menu-toggle .icon svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 /* Mobile Landscape Mode Optimizations */
 @media (max-width: 900px) and (orientation: landscape) {
   #live-view {
@@ -4151,6 +4275,19 @@ header.meeting-header {
     left: 0.5rem;
     width: 36px;
     height: 36px;
+  }
+
+  /* Mobile menu toggle in landscape */
+  .mobile-menu-toggle {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 0.65rem);
+    right: 1rem;
+    width: 48px;
+    height: 48px;
+  }
+
+  .mobile-menu-toggle .icon svg {
+    width: 20px;
+    height: 20px;
   }
 }
 
