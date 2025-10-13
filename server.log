@@ -509,3 +509,38 @@ Found 0 uploading/recent videos
 [0mGET /classes/893-411-965 [32m200[0m 119.696 ms - 902[0m
 Found 0 uploading/recent videos
 [0mGET /admin/uploading-videos [36m304[0m 2153.086 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 314.013 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 99.323 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 66.837 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 86.971 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 68.706 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 71.814 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 94.109 ms - -[0m
+[0mGET /class/893-411-965?token=893-411-965 [32m200[0m 20.138 ms - 33337[0m
+[0mGET /.well-known/appspecific/com.chrome.devtools.json [33m404[0m 1.384 ms - 187[0m
+[0mGET /public/css/style.css [32m200[0m 2.661 ms - 87087[0m
+[0mGET /public/js/meetingAutoJoin.js [32m200[0m 5.654 ms - 1547[0m
+[0mGET /public/js/uploadQueue.js [32m200[0m 1.943 ms - 8068[0m
+[0mGET /public/js/class.js [32m200[0m 1.551 ms - 285867[0m
+[0mGET /classes/893-411-965 [32m200[0m 69.243 ms - 902[0m
+[0mGET /auth/me [32m200[0m 94.757 ms - 151[0m
+[0mGET /favicon.ico [33m404[0m 0.890 ms - 150[0m
+[0mGET /chat/893-411-965 [32m200[0m 62.076 ms - 2[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 79.449 ms - -[0m
+[0mGET /classes/893-411-965 [32m200[0m 59.286 ms - 902[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 88.465 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 84.127 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 83.250 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 77.810 ms - -[0m
