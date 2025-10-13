@@ -125,8 +125,13 @@
 - [ ] VVD Live logo button (120x120px) visible in top-right on mobile
 - [ ] Bottom control bar hidden on mobile
 - [ ] Logo button opens full-screen menu when clicked
-- [ ] All control buttons visible in menu
-- [ ] Each button has a label
+- [ ] **All control buttons visible in 3-column grid layout**
+- [ ] **No items overflow off screen (portrait)**
+- [ ] **No items overflow off screen (landscape)**
+- [ ] Each button has a label (no text cutoff)
+- [ ] All items fit within screen width
+- [ ] Menu scrolls vertically if needed
+- [ ] No horizontal scroll on any device size
 - [ ] Buttons work when clicked
 - [ ] **Menu closes instantly after clicking ANY button**
 - [ ] Selected action is visible after menu closes
@@ -137,6 +142,12 @@
 - [ ] Student-only buttons shown only for students
 - [ ] Badges (counts) are visible on buttons
 - [ ] Active states reflected correctly
+
+### Orientation Tests
+- [ ] Portrait mode: 3 columns, proper spacing
+- [ ] Landscape mode: 3 columns, compact layout
+- [ ] Rotate device: menu adapts without overflow
+- [ ] Very small screens (<400px): reduced sizes but no overflow
 
 ## Expected Behavior
 
@@ -157,9 +168,11 @@
 
 ## Responsive Breakpoints
 
-- **Desktop**: > 768px - Normal controls
-- **Tablet/Mobile**: ≤ 768px - VVD Logo menu button
-- **Small Mobile**: ≤ 480px - 2-column grid in menu
+- **Desktop**: > 768px - Normal controls + logo watermark
+- **Tablet/Mobile**: ≤ 768px - VVD Logo menu button (clickable)
+- **Mobile Portrait**: ≤ 768px portrait - 3-column grid, optimized spacing
+- **Mobile Landscape**: ≤ 768px landscape - 3-column grid, compact layout
+- **Very Small**: ≤ 400px - 3-column grid, reduced font/padding
 
 ## Troubleshooting
 
@@ -183,6 +196,13 @@
 1. Original buttons should work
 2. Menu just clones and triggers original buttons
 3. Check if original buttons work on desktop
+
+### Items overflowing or going off screen?
+1. Should now be fixed with 3-column grid layout
+2. All items constrained to screen width
+3. Vertical scroll enabled if needed
+4. No horizontal overflow on any screen size
+5. Try rotating device - should adapt automatically
 
 ## Quick Browser Console Test
 

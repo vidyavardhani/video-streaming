@@ -36,21 +36,26 @@ Implemented the VVD Live logo as a watermark in the top-right corner on all devi
   - Hover effect: slight scale and full opacity
   - Active effect: scale down for tactile feedback
 
-#### Mobile Menu Overlay Styles (lines 4232-4386)
-- Full-screen overlay with slide-in animation from right
+#### Mobile Menu Overlay Styles
+- Full-screen overlay (100vh/100dvh) with slide-in animation from right
 - Semi-transparent dark background with blur effect
+- Proper overflow handling (y-axis scroll, x-axis hidden)
 - Responsive grid layout for control buttons:
-  - 3 columns on tablets (portrait)
-  - 2 columns on small phones
-  - Auto-fill on larger screens
+  - **Default**: 3 columns (fits all screen sizes)
+  - **Portrait mode**: 3 columns with optimized spacing
+  - **Landscape mode**: 3 columns with compact layout
+  - **Very small screens (<400px)**: Reduced padding and font sizes
+- All items guaranteed to fit on screen without horizontal overflow
 
 #### Control Button Adaptations
 - Buttons in mobile menu displayed vertically with:
-  - Icon on top
-  - Label text below
-  - Minimum height of 100px
-  - Larger touch targets for mobile
+  - Icon on top (40px on portrait, 36px on landscape)
+  - Label text below (responsive font sizes)
+  - Adaptive minimum heights (90px → 75px on landscape)
+  - Optimized padding for different screen sizes
+  - Text overflow handling (ellipsis for long labels)
   - Badge indicators positioned absolutely
+  - 100% width within grid cells - no overflow
 
 #### Responsive Behavior
 - Desktop: Normal bottom control bar

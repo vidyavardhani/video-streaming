@@ -268,3 +268,86 @@ Found 0 uploading/recent videos
 [0mGET /classes/893-411-965 [36m304[0m 172.427 ms - -[0m
 Found 0 uploading/recent videos
 [0mGET /admin/uploading-videos [36m304[0m 96.089 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 89.074 ms - -[0m
+[0mGET /class/893-411-965?token=893-411-965 [36m304[0m 27.346 ms - -[0m
+[0mGET /public/js/meetingAutoJoin.js [36m304[0m 4.584 ms - -[0m
+[0mGET /public/js/uploadQueue.js [36m304[0m 0.245 ms - -[0m
+[0mGET /public/js/class.js [36m304[0m 0.232 ms - -[0m
+[0mGET /public/css/style.css [32m200[0m 7.675 ms - 81201[0m
+[0mGET /classes/893-411-965 [36m304[0m 66.422 ms - -[0m
+[0mGET /auth/me [36m304[0m 68.861 ms - -[0m
+[0mGET /favicon.ico [33m404[0m 0.430 ms - 150[0m
+[0mGET /chat/893-411-965 [36m304[0m 58.539 ms - -[0m
+[0mGET /classes/893-411-965 [36m304[0m 56.413 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 88.762 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 82.153 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 85.126 ms - -[0m
+[0mGET /class/893-411-965?token=893-411-965 [36m304[0m 10.591 ms - -[0m
+[0mGET /public/css/style.css [36m304[0m 0.813 ms - -[0m
+[0mGET /public/js/meetingAutoJoin.js [36m304[0m 1.323 ms - -[0m
+[0mGET /public/js/uploadQueue.js [36m304[0m 0.542 ms - -[0m
+[0mGET /public/js/class.js [36m304[0m 0.903 ms - -[0m
+[0mGET /classes/893-411-965 [36m304[0m 59.450 ms - -[0m
+[0mGET /auth/me [36m304[0m 74.459 ms - -[0m
+[0mGET /favicon.ico [33m404[0m 0.349 ms - 150[0m
+[0mGET /chat/893-411-965 [36m304[0m 57.264 ms - -[0m
+[0mGET /classes/893-411-965 [36m304[0m 69.956 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 108.920 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 147.683 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 87.690 ms - -[0m
+[0mGET /class/893-411-965?token=893-411-965 [36m304[0m 15.965 ms - -[0m
+[0mGET /public/css/style.css [36m304[0m 1.207 ms - -[0m
+[0mGET /public/js/meetingAutoJoin.js [36m304[0m 1.218 ms - -[0m
+[0mGET /public/js/class.js [36m304[0m 0.759 ms - -[0m
+[0mGET /public/js/uploadQueue.js [36m304[0m 0.777 ms - -[0m
+[0mGET /classes/893-411-965 [36m304[0m 142.622 ms - -[0m
+[0mGET /auth/me [36m304[0m 58.402 ms - -[0m
+[0mGET /favicon.ico [33m404[0m 0.610 ms - 150[0m
+[0mGET /chat/893-411-965 [36m304[0m 141.351 ms - -[0m
+[0mGET /classes/893-411-965 [36m304[0m 56.091 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 92.614 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 61.500 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 64.117 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 74.232 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 67.192 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 67.192 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 86.266 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 71.499 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 77.808 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 70.778 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 67.521 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 73.177 ms - -[0m
+[0mGET /.well-known/appspecific/com.chrome.devtools.json [33m404[0m 6.954 ms - 187[0m
+[0mGET /public/css/style.css [32m200[0m 6.204 ms - 82374[0m
+[0mGET /class/893-411-965?token=893-411-965 [32m200[0m 6.065 ms - 33250[0m
+[0mGET /.well-known/appspecific/com.chrome.devtools.json [33m404[0m 2.374 ms - 187[0m
+[0mGET /public/css/style.css [32m200[0m 1.945 ms - 82374[0m
+[0mGET /public/js/meetingAutoJoin.js [32m200[0m 2.265 ms - 1547[0m
+[0mGET /public/js/uploadQueue.js [32m200[0m 2.744 ms - 8068[0m
+[0mGET /public/js/class.js [32m200[0m 3.914 ms - 284120[0m
+[0mGET /classes/893-411-965 [32m200[0m 68.300 ms - 902[0m
+[0mGET /auth/me [32m200[0m 132.553 ms - 151[0m
+[0mGET /favicon.ico [33m404[0m 0.443 ms - 150[0m
+[0mGET /chat/893-411-965 [32m200[0m 79.972 ms - 2[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 77.246 ms - -[0m
+[0mGET /classes/893-411-965 [32m200[0m 69.234 ms - 902[0m
