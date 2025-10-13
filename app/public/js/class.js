@@ -7065,6 +7065,82 @@
     syncViewportLayout();
   });
 
+  // Auto-fullscreen on mobile landscape orientation
+  const handleOrientationChange = async () => {
+    if (!isMobileDevice()) return;
+    
+    // Check if in live view
+    const liveView = document.getElementById('live-view');
+    if (!liveView || liveView.classList.contains('hidden')) return;
+    
+    const isLandscape = window.innerWidth > window.innerHeight;
+    
+    if (isLandscape) {
+      // Automatically enter fullscreen when rotating to landscape on mobile
+      if (!isFullscreen()) {
+        console.log('📱 Mobile landscape detected - entering fullscreen');
+        await requestFullscreen();
+      }
+      
+      // Lock orientation to landscape if supported
+      try {
+        if (screen.orientation && screen.orientation.lock) {
+          await screen.orientation.lock('landscape').catch(() => {
+            // Silently fail if orientation lock not supported
+          });
+        }
+      } catch (err) {
+        // Orientation lock not supported or failed
+      }
+    } else {
+      // Unlock orientation when rotating back to portrait
+      try {
+        if (screen.orientation && screen.orientation.unlock) {
+          screen.orientation.unlock();
+        }
+      } catch (err) {
+        // Orientation unlock failed
+      }
+    }
+    
+    // Sync layout after orientation change
+    syncViewportLayout();
+  };
+
+  // Listen for orientation changes
+  window.addEventListener('orientationchange', handleOrientationChange);
+  
+  // Also listen for resize as a fallback for devices that don't support orientationchange
+  let resizeTimeout;
+  const handleResizeOrientation = () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(handleOrientationChange, 300);
+  };
+  
+  // Add to existing resize handler
+  window.addEventListener('resize', handleResizeOrientation);
+
+  // Listen for fullscreen changes to update UI
+  const handleFullscreenChange = () => {
+    updateFullscreenButton();
+    
+    // If exiting fullscreen on mobile, unlock orientation
+    if (!isFullscreen() && isMobileDevice()) {
+      try {
+        if (screen.orientation && screen.orientation.unlock) {
+          screen.orientation.unlock();
+        }
+      } catch (err) {
+        // Orientation unlock failed
+      }
+    }
+  };
+
+  document.addEventListener('fullscreenchange', handleFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+  document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+  document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
   elements.chatForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = elements.chatInput.value.trim();
