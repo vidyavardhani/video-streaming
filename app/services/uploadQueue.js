@@ -1,19 +1,11 @@
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const fsp = require('fs/promises');
 const path = require('path');
-require('dotenv').config(); // Ensure env vars are loaded
 
-const region = process.env.AWS_REGION || 'ap-southeast-2';
+const region = process.env.AWS_REGION || 'us-east-1';
 const bucket = process.env.AWS_S3_BUCKET_NAME;
 const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-
-console.log('🔍 UploadQueue checking AWS config:', {
-  region,
-  bucket: bucket ? bucket.substring(0, 10) + '...' : 'NOT SET',
-  accessKeyId: accessKeyId ? accessKeyId.substring(0, 10) + '...' : 'NOT SET',
-  secretAccessKey: secretAccessKey ? '***' : 'NOT SET'
-});
 
 let s3Client = null;
 if (bucket && accessKeyId && secretAccessKey) {
@@ -24,14 +16,6 @@ if (bucket && accessKeyId && secretAccessKey) {
       secretAccessKey
     }
   });
-  console.log(`✅ UploadQueue S3 Client configured: Bucket=${bucket}, Region=${region}`);
-} else {
-  console.error('⚠️ UploadQueue S3 client NOT configured. Missing:', {
-    bucket: !bucket ? 'AWS_S3_BUCKET_NAME' : 'OK',
-    accessKeyId: !accessKeyId ? 'AWS_ACCESS_KEY_ID' : 'OK',
-    secretAccessKey: !secretAccessKey ? 'AWS_SECRET_ACCESS_KEY' : 'OK'
-  });
-  console.error('⚠️ All uploads will FAIL until AWS credentials are configured!');
 }
 
 // In-memory queue for upload jobs
@@ -163,30 +147,25 @@ const processQueue = async () => {
         });
       }
 
-      // Try uploading to S3 - DO NOT FALLBACK TO LOCAL
+      // Try uploading to S3
       let uploadUrl = null;
       let uploadError = null;
 
       try {
-        if (!s3Client) {
-          throw new Error('S3 client not configured. Check AWS environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET_NAME)');
-        }
-        
-        console.log(`Uploading to S3: ${job.fileKey} (${job.buffer.length} bytes)`);
         uploadUrl = await uploadToS3(job.fileKey, job.buffer, job.mimeType);
-        console.log(`✅ Successfully uploaded to S3: ${uploadUrl}`);
+        console.log(`Successfully uploaded to S3: ${uploadUrl}`);
       } catch (s3Error) {
-        console.error('❌ S3 upload failed:', {
-          error: s3Error.message,
-          code: s3Error.code,
-          bucket: bucket,
-          region: region,
-          key: job.fileKey
-        });
+        console.error('S3 upload failed, falling back to local storage:', s3Error);
+        uploadError = s3Error;
         
-        // DO NOT FALLBACK - Force S3 upload only
-        // If S3 fails, the job will retry
-        throw new Error(`S3 upload failed: ${s3Error.message}. Will retry.`);
+        // Fallback to local storage
+        try {
+          uploadUrl = await saveLocalRecording(job.fileKey, job.buffer);
+          console.log(`Saved to local storage: ${uploadUrl}`);
+        } catch (localError) {
+          console.error('Local storage also failed:', localError);
+          throw localError;
+        }
       }
 
       // Update job status

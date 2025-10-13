@@ -4697,28 +4697,9 @@
     if (typeof window === 'undefined') {
       return 'landscape';
     }
-    
     const docEl = typeof document !== 'undefined' ? document.documentElement : null;
     const width = window.innerWidth || docEl?.clientWidth || 0;
     const height = window.innerHeight || docEl?.clientHeight || 0;
-    
-    // FORCE LANDSCAPE ON MOBILE DEVICES
-    if (isMobileDevice()) {
-      // Show/hide rotate overlay based on orientation
-      const isPortraitOrientation = height > width;
-      const rotateOverlay = document.getElementById('rotate-device-overlay');
-      if (rotateOverlay) {
-        if (isPortraitOrientation) {
-          rotateOverlay.classList.remove('hidden');
-          console.log('📱 Mobile in portrait mode - showing rotate prompt');
-        } else {
-          rotateOverlay.classList.add('hidden');
-        }
-      }
-      // Always use landscape layout for mobile
-      return 'landscape';
-    }
-    
     if (!width) {
       return 'landscape';
     }
@@ -6146,6 +6127,93 @@
     state.socket.on('webrtc:signal', handleSignal);
   };
 
+  const isFullscreen = () => {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement || 
+              document.mozFullScreenElement || document.msFullscreenElement);
+  };
+
+  const exitFullscreen = async () => {
+    try {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        await document.webkitExitFullscreen();
+      } else if (document.mozCancelFullScreen) {
+        await document.mozCancelFullScreen();
+      } else if (document.msExitFullscreen) {
+        await document.msExitFullscreen();
+      }
+      console.log('✅ Exited fullscreen mode');
+      showLiveToast('🖥️ Exited fullscreen mode', { duration: 2000 });
+    } catch (error) {
+      console.log('Exit fullscreen failed:', error);
+    }
+  };
+
+  const requestFullscreen = async () => {
+    try {
+      const elem = document.documentElement;
+      
+      // Check if already in fullscreen
+      if (isFullscreen()) {
+        console.log('Already in fullscreen mode');
+        return;
+      }
+      
+      // Request fullscreen with browser compatibility
+      if (elem.requestFullscreen) {
+        await elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) {
+        await elem.webkitRequestFullscreen(); // Safari
+      } else if (elem.mozRequestFullScreen) {
+        await elem.mozRequestFullScreen(); // Firefox
+      } else if (elem.msRequestFullscreen) {
+        await elem.msRequestFullscreen(); // IE/Edge
+      }
+      
+      console.log('✅ Entered fullscreen mode');
+      showLiveToast('🖥️ Entered fullscreen mode', { duration: 2000 });
+    } catch (error) {
+      console.log('Fullscreen request failed or denied:', error);
+      // Don't show error to user - they might have denied permission
+    }
+  };
+
+  const toggleFullscreen = async () => {
+    if (isFullscreen()) {
+      await exitFullscreen();
+    } else {
+      await requestFullscreen();
+    }
+  };
+
+  const updateFullscreenButton = () => {
+    const fullscreenBtn = document.getElementById('toggle-fullscreen');
+    const fullscreenText = document.getElementById('fullscreen-text');
+    const quickFullscreenBtn = document.getElementById('quick-fullscreen');
+    
+    const inFullscreen = isFullscreen();
+    
+    // Update menu button
+    if (fullscreenBtn && fullscreenText) {
+      fullscreenText.textContent = inFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+      fullscreenBtn.setAttribute('aria-pressed', inFullscreen.toString());
+    }
+    
+    // Update quick button in top-left
+    if (quickFullscreenBtn) {
+      quickFullscreenBtn.setAttribute('aria-pressed', inFullscreen.toString());
+      quickFullscreenBtn.setAttribute('title', inFullscreen ? 'Exit fullscreen (ESC)' : 'Enter fullscreen (F11)');
+      quickFullscreenBtn.setAttribute('aria-label', inFullscreen ? 'Exit fullscreen' : 'Enter fullscreen');
+      
+      if (inFullscreen) {
+        quickFullscreenBtn.classList.add('in-fullscreen');
+      } else {
+        quickFullscreenBtn.classList.remove('in-fullscreen');
+      }
+    }
+  };
+
   const beginCall = async () => {
     if (!isStreamActive(state.localStream)) {
       await setupPreview({ force: true });
@@ -6157,6 +6225,11 @@
     } else {
       createPeerConnection('host', true);
     }
+    
+    // Auto-enter fullscreen when call begins
+    setTimeout(() => {
+      requestFullscreen();
+    }, 500); // Small delay to ensure UI is ready
   };
 
   const leaveSession = () => {
@@ -7786,6 +7859,31 @@
   elements.stageZoomOut?.addEventListener('click', () => {
     setStageZoom(state.stageZoom - 0.1);
   });
+
+  // Fullscreen toggle button (in More menu)
+  const fullscreenBtn = document.getElementById('toggle-fullscreen');
+  if (fullscreenBtn) {
+    fullscreenBtn.addEventListener('click', async () => {
+      await toggleFullscreen();
+      updateFullscreenButton();
+    });
+  }
+
+  // Quick fullscreen button (top-left corner)
+  const quickFullscreenBtn = document.getElementById('quick-fullscreen');
+  if (quickFullscreenBtn) {
+    quickFullscreenBtn.addEventListener('click', async () => {
+      await toggleFullscreen();
+      updateFullscreenButton();
+      registerOverlayInteraction({ autoHide: true });
+    });
+  }
+
+  // Listen for fullscreen changes (user presses F11 or ESC)
+  document.addEventListener('fullscreenchange', updateFullscreenButton);
+  document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+  document.addEventListener('mozfullscreenchange', updateFullscreenButton);
+  document.addEventListener('MSFullscreenChange', updateFullscreenButton);
 
   elements.chatToggle?.addEventListener('click', () => toggleDrawer('chat'));
   elements.participantsToggle?.addEventListener('click', () => toggleDrawer('participants'));

@@ -2,10 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Live Class</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,21 +10,6 @@
   <link rel="stylesheet" href="/public/css/style.css">
 </head>
 <body>
-  <!-- Rotate Device Overlay for Mobile Portrait Mode -->
-  <div id="rotate-device-overlay" class="rotate-overlay hidden">
-    <div class="rotate-content">
-      <div class="rotate-icon">
-        <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-          <rect x="15" y="25" width="50" height="30" rx="4" stroke="currentColor" stroke-width="3" fill="none"/>
-          <path d="M25 35h30M25 45h30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <path d="M50 30l8 8-8 8" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <h2>Please Rotate Your Device</h2>
-      <p>For the best experience, please use landscape mode</p>
-    </div>
-  </div>
-
   <div
     id="class-app"
     data-class-code="<%= classCode %>"
@@ -91,6 +73,11 @@
     <section id="live-view" class="hidden">
       <div class="meeting-shell">
         <header class="meeting-header">
+          <button id="quick-fullscreen" class="quick-fullscreen-btn" type="button" aria-label="Toggle fullscreen" title="Toggle fullscreen (F11)">
+            <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
           <div class="meeting-heading">
             <span class="meeting-context">VVD Live Session</span>
             <h2 id="live-meeting-title">Live class</h2>
@@ -470,6 +457,17 @@
                 </svg>
               </span>
               <span class="text">Rejoin</span>
+            </button>
+            <button id="toggle-fullscreen" class="menu-btn" type="button" role="menuitem" data-tooltip="Fullscreen">
+              <span class="icon">
+                <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+                  <path d="M21 8V5a2 2 0 0 0-2-2h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+                  <path d="M3 16v3a2 2 0 0 0 2 2h3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+                  <path d="M16 21h3a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+              </span>
+              <span class="text" id="fullscreen-text">Fullscreen</span>
             </button>
             <button id="leave-btn" class="menu-btn" type="button" role="menuitem" data-tooltip="Leave">
               <span class="icon">
