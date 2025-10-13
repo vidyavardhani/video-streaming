@@ -58,11 +58,17 @@ Implemented the VVD Live logo as a watermark in the top-right corner on all devi
   - 100% width within grid cells - no overflow
 
 #### Responsive Behavior
-- Desktop: Normal bottom control bar
-- Mobile (≤768px): 
+- **Desktop**: Normal bottom control bar visible
+- **Mobile Portrait (≤768px)**: 
   - Bottom control bar hidden
-  - Three-dot menu button visible
+  - VVD logo button clickable
   - Full-screen menu on click
+- **Mobile Landscape (≤768px width OR ≤500px height)**:
+  - Bottom control bar hidden
+  - VVD logo button clickable  
+  - Full-screen menu on click
+  - Compact 3-column layout
+  - Logo sized at 80px for space efficiency
 
 ### 3. JavaScript Functionality (`app/public/js/class.js`)
 
@@ -113,6 +119,14 @@ Created `initializeMobileMenu()` function that:
 ✅ **Mobile**: Same logo functions as interactive menu button
 ✅ Always visible in top-right corner on all devices
 ✅ Seamless transition between watermark and button based on screen size
+
+### First-Time User Guidance
+✅ **Animated pulse effect** on VVD logo for first-time visitors
+✅ **"Tap for controls" tooltip** appears on mobile devices
+✅ **Smart positioning**: Below logo (portrait), Left side (landscape)
+✅ **Auto-dismisses** after 5 seconds or when user clicks
+✅ **Persistent tracking**: Won't show again after first interaction
+✅ Helps users discover the hidden menu controls
 
 ### Mobile Menu Design
 ✅ Hidden bottom control bar on mobile  

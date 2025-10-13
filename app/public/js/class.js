@@ -7770,6 +7770,28 @@
 
     if (!mobileMenuBtn || !mobileControlsMenu || !mobileMenuGrid || !controlDock) return;
 
+    // First-time hint indicator
+    const HINT_SHOWN_KEY = 'vvd_mobile_menu_hint_shown';
+    const hasSeenHint = storageGet(storage.local, HINT_SHOWN_KEY);
+    
+    // Check if mobile (width <= 768px OR landscape with height <= 500px)
+    const isMobileView = () => {
+      return window.innerWidth <= 768 || (window.innerHeight <= 500 && window.matchMedia('(orientation: landscape)').matches);
+    };
+    
+    // Show hint on first visit (mobile only)
+    if (!hasSeenHint && isMobileView()) {
+      setTimeout(() => {
+        mobileMenuBtn.classList.add('show-hint');
+        
+        // Auto-hide hint after 5 seconds
+        setTimeout(() => {
+          mobileMenuBtn.classList.remove('show-hint');
+          storageSet(storage.local, HINT_SHOWN_KEY, 'true');
+        }, 5000);
+      }, 1000); // Show after 1 second delay
+    }
+
     // Button labels mapping
     const buttonLabels = {
       'live-mic-toggle': 'Microphone',
@@ -7819,9 +7841,21 @@
 
     // Open mobile menu (only on mobile devices)
     const openMobileMenu = () => {
-      // Only open menu on mobile (screen width <= 768px)
-      if (window.innerWidth > 768) {
+      console.log('openMobileMenu called');
+      console.log('isMobileView result:', isMobileView());
+      
+      // Only open menu on mobile (check width and landscape mode)
+      if (!isMobileView()) {
+        console.log('Not mobile view - exiting');
         return; // Do nothing on desktop
+      }
+      
+      console.log('Opening menu...');
+      
+      // Hide hint when user opens menu
+      if (mobileMenuBtn.classList.contains('show-hint')) {
+        mobileMenuBtn.classList.remove('show-hint');
+        storageSet(storage.local, HINT_SHOWN_KEY, 'true');
       }
       
       cloneControlsToMobileMenu();
@@ -7829,6 +7863,9 @@
       mobileMenuBackdrop?.classList.remove('hidden');
       mobileMenuBtn?.setAttribute('aria-expanded', 'true');
       document.body.classList.add('no-scroll');
+      
+      console.log('Menu should be visible now');
+      console.log('Menu classes:', mobileControlsMenu?.className);
     };
 
     // Close mobile menu
@@ -7840,7 +7877,14 @@
     };
 
     // Event listeners
-    mobileMenuBtn.addEventListener('click', openMobileMenu);
+    mobileMenuBtn.addEventListener('click', (e) => {
+      console.log('Mobile menu button clicked!');
+      console.log('Window width:', window.innerWidth);
+      console.log('Window height:', window.innerHeight);
+      console.log('Is mobile view:', isMobileView());
+      console.log('Orientation:', window.matchMedia('(orientation: landscape)').matches ? 'landscape' : 'portrait');
+      openMobileMenu();
+    });
     mobileMenuClose?.addEventListener('click', closeMobileMenu);
     mobileMenuBackdrop?.addEventListener('click', closeMobileMenu);
     

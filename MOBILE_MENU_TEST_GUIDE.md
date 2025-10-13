@@ -10,6 +10,8 @@
 ### Mobile (screen width ≤ 768px):
 - ✅ **Bottom control bar is HIDDEN**
 - ✅ **VVD Live logo becomes interactive MENU BUTTON**
+- ✅ **First-time visitors see pulse animation + "Tap for controls" hint**
+- ✅ **Hint auto-dismisses after 5 seconds or on click**
 - ✅ **Click logo → Full-screen menu with all controls**
 
 ## How to Test
@@ -124,6 +126,12 @@
 ### Mobile Tests  
 - [ ] VVD Live logo button (120x120px) visible in top-right on mobile
 - [ ] Bottom control bar hidden on mobile
+- [ ] **First visit: Pulse animation on logo (clear localStorage to test)**
+- [ ] **First visit: "Tap for controls" tooltip appears**
+- [ ] **Tooltip positioned below logo (portrait) or left side (landscape)**
+- [ ] **Tooltip auto-dismisses after 5 seconds**
+- [ ] **Clicking logo dismisses tooltip immediately**
+- [ ] **Tooltip doesn't show on subsequent visits**
 - [ ] Logo button opens full-screen menu when clicked
 - [ ] **All control buttons visible in 3-column grid layout**
 - [ ] **No items overflow off screen (portrait)**
@@ -144,9 +152,12 @@
 - [ ] Active states reflected correctly
 
 ### Orientation Tests
-- [ ] Portrait mode: 3 columns, proper spacing
-- [ ] Landscape mode: 3 columns, compact layout
+- [ ] Portrait mode: Bottom controls HIDDEN, logo clickable, 3 columns
+- [ ] Landscape mode: Bottom controls HIDDEN, logo clickable, 3 columns compact
+- [ ] **IMPORTANT: No bottom control bar visible in landscape mode**
 - [ ] Rotate device: menu adapts without overflow
+- [ ] Logo in landscape: 80px size, positioned top-right
+- [ ] Hint in landscape: Appears to LEFT of logo
 - [ ] Very small screens (<400px): reduced sizes but no overflow
 
 ## Expected Behavior
@@ -157,7 +168,7 @@
 - Logo is **non-interactive** (clicking does nothing)
 - Logo serves as branding/watermark element
 
-### Mobile (≤ 768px)
+### Mobile Portrait (≤ 768px)
 - Bottom control bar completely hidden
 - VVD Live logo button (120x120px) visible in top-right
 - Logo is **interactive** (tappable)
@@ -166,13 +177,24 @@
 - **Menu closes instantly when any control is clicked**
 - Selected action becomes immediately visible
 
+### Mobile Landscape (≤ 768px width OR ≤ 500px height)
+- **Bottom control bar completely HIDDEN** (not visible)
+- VVD Live logo button (80x80px) visible in top-right
+- Logo is **interactive** (tappable)
+- Tapping logo opens full-screen menu
+- 3-column compact grid layout
+- Hint tooltip appears to LEFT of logo (if first visit)
+- All controls accessible ONLY through logo menu
+- **No bottom bar - clean fullscreen video experience**
+
 ## Responsive Breakpoints
 
-- **Desktop**: > 768px - Normal controls + logo watermark
-- **Tablet/Mobile**: ≤ 768px - VVD Logo menu button (clickable)
-- **Mobile Portrait**: ≤ 768px portrait - 3-column grid, optimized spacing
-- **Mobile Landscape**: ≤ 768px landscape - 3-column grid, compact layout
-- **Very Small**: ≤ 400px - 3-column grid, reduced font/padding
+- **Desktop**: > 768px AND height > 500px - Normal controls + logo watermark
+- **Mobile Portrait**: ≤ 768px width - Bottom controls HIDDEN, logo menu (120x120px)
+- **Mobile Landscape**: ≤ 768px width OR (≤ 500px height + landscape) - Bottom controls HIDDEN, logo menu (80x80px)
+- **Menu Grid Portrait**: 3 columns, 85px min-height, optimized spacing
+- **Menu Grid Landscape**: 3 columns, 75px min-height, compact layout
+- **Very Small Screens**: ≤ 400px - 3-column grid, reduced font/padding
 
 ## Troubleshooting
 
@@ -204,6 +226,14 @@
 4. No horizontal overflow on any screen size
 5. Try rotating device - should adapt automatically
 
+### Bottom controls still showing in landscape mode?
+1. Check if screen width is ≤ 768px OR height is ≤ 500px in landscape
+2. Controls should be completely hidden in mobile landscape
+3. Hard refresh the page (Cmd+Shift+R / Ctrl+Shift+R)
+4. Clear browser cache if issue persists
+5. Check console for any CSS override errors
+6. Logo should be 80x80px in landscape, clickable in top-right
+
 ## Quick Browser Console Test
 
 Open browser console and type:
@@ -219,7 +249,39 @@ window.mobileMenuHelpers.close()
 
 // Refresh menu buttons
 window.mobileMenuHelpers.refresh()
+
+// Test first-time hint again (clear the flag)
+localStorage.removeItem('vvd_mobile_menu_hint_shown')
+// Then refresh the page to see the hint again
 ```
+
+## Testing First-Time Hint
+
+To test the first-time user hint indicator:
+
+1. **Clear localStorage:**
+   ```javascript
+   localStorage.removeItem('vvd_mobile_menu_hint_shown')
+   ```
+   
+2. **Refresh the page** (F5 or Cmd+R)
+
+3. **On mobile view, you should see:**
+   - Pulse animation on VVD logo
+   - "Tap for controls" tooltip
+   - Position: Below logo (portrait) or left side (landscape)
+
+4. **Test auto-dismiss:**
+   - Wait 5 seconds - hint should disappear
+
+5. **Test click-dismiss:**
+   - Clear localStorage again and refresh
+   - Click the logo immediately
+   - Hint should disappear and menu should open
+
+6. **Test persistence:**
+   - Refresh the page again
+   - Hint should NOT appear anymore
 
 ## Files Modified
 
