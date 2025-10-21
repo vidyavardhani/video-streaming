@@ -132,6 +132,13 @@
             </div>
             <canvas id="whiteboard-canvas" class="whiteboard hidden" width="960" height="540"></canvas>
             <div id="speaker-banner" class="speaker-banner hidden"></div>
+            <div id="vvd-text-overlay" class="vvd-text-overlay hidden">
+              <span id="vvd-overlay-content"></span>
+            </div>
+            <div id="recording-indicator" class="recording-indicator hidden">
+              <span class="recording-dot"></span>
+              <span class="recording-text">RECORDING</span>
+            </div>
           </div>
           <div id="pip-container" class="stage-pip hidden">
             <video id="pip-video" autoplay muted playsinline></video>
@@ -201,6 +208,7 @@
             <button class="utility-tab" data-tab="polls">Polls</button>
             <button class="utility-tab" data-tab="qna">Q&amp;A</button>
             <button class="utility-tab" data-tab="recording">Recording</button>
+            <button class="utility-tab" data-tab="vvd-overlay">VVD Text</button>
           </div>
           <div class="utility-content">
             <section class="utility-pane" data-pane="whiteboard">
@@ -259,6 +267,30 @@
                   <button id="recording-stop" class="ghost small">Stop recording</button>
                 </div>
                 <div id="recording-link" class="recording-link hidden"></div>
+              </div>
+            </section>
+            <section class="utility-pane hidden" data-pane="vvd-overlay">
+              <div class="panel-card">
+                <h4>VVD Text Overlay</h4>
+                <p class="muted">Type text that will appear on the live stream for all viewers to see.</p>
+                <div class="vvd-overlay-controls">
+                  <textarea id="vvd-overlay-text" placeholder="Enter text to display on live stream..." rows="3"></textarea>
+                  <div class="vvd-overlay-actions">
+                    <button id="vvd-overlay-show" class="primary small">Show on Stream</button>
+                    <button id="vvd-overlay-hide" class="ghost small">Hide from Stream</button>
+                    <button id="vvd-overlay-clear" class="ghost small">Clear Text</button>
+                  </div>
+                  <div class="vvd-overlay-preview">
+                    <label for="vvd-overlay-position">Position:</label>
+                    <select id="vvd-overlay-position">
+                      <option value="top-left">Top Left</option>
+                      <option value="top-right">Top Right</option>
+                      <option value="bottom-left">Bottom Left</option>
+                      <option value="bottom-right" selected>Bottom Right</option>
+                      <option value="center">Center</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </section>
           </div>

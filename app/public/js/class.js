@@ -128,6 +128,7 @@
     questions: [],
     recording: { isRecording: false, isPaused: false },
     recordingUploadPending: false,
+    vvdOverlay: { text: '', visible: false, position: 'bottom-right' },
     raisedHands: new Map(),
     mediaStates: new Map(),
     handRaised: false,
@@ -1334,7 +1335,15 @@
     modalMessage: document.getElementById('modal-message'),
     modalPrimary: document.getElementById('modal-primary'),
     modalSecondary: document.getElementById('modal-secondary'),
-    stage: document.querySelector('.stage')
+    stage: document.querySelector('.stage'),
+    vvdTextOverlay: document.getElementById('vvd-text-overlay'),
+    vvdOverlayContent: document.getElementById('vvd-overlay-content'),
+    vvdOverlayText: document.getElementById('vvd-overlay-text'),
+    vvdOverlayShow: document.getElementById('vvd-overlay-show'),
+    vvdOverlayHide: document.getElementById('vvd-overlay-hide'),
+    vvdOverlayClear: document.getElementById('vvd-overlay-clear'),
+    vvdOverlayPosition: document.getElementById('vvd-overlay-position'),
+    recordingIndicator: document.getElementById('recording-indicator')
   };
 
   if (elements.nameInput && prefillNameFromDataset && !elements.nameInput.value) {
@@ -3820,6 +3829,11 @@
     if (elements.meterRecording) {
       elements.meterRecording.classList.toggle('hidden', !isRecording);
     }
+    
+    // Toggle blinking recording indicator (visible to all users)
+    if (elements.recordingIndicator) {
+      elements.recordingIndicator.classList.toggle('hidden', !isRecording);
+    }
   };
 
   const applyRecordingPayload = (payload = {}) => {
@@ -3911,6 +3925,34 @@
     clearInterval(recordingTimerInterval);
     recordingTimerInterval = setInterval(update, 1000);
     update();
+  };
+
+  // VVD Text Overlay Functions
+  const updateVVDOverlay = (text, visible, position) => {
+    if (!elements.vvdTextOverlay || !elements.vvdOverlayContent) return;
+    
+    state.vvdOverlay.text = text || '';
+    state.vvdOverlay.visible = visible !== undefined ? visible : state.vvdOverlay.visible;
+    state.vvdOverlay.position = position || state.vvdOverlay.position;
+    
+    elements.vvdOverlayContent.textContent = state.vvdOverlay.text;
+    elements.vvdTextOverlay.classList.toggle('hidden', !state.vvdOverlay.visible);
+    
+    // Update position classes
+    elements.vvdTextOverlay.className = elements.vvdTextOverlay.className.replace(/top-left|top-right|bottom-left|bottom-right|center/g, '');
+    elements.vvdTextOverlay.classList.add(state.vvdOverlay.position);
+  };
+
+  const showVVDOverlay = (text, position) => {
+    updateVVDOverlay(text, true, position);
+  };
+
+  const hideVVDOverlay = () => {
+    updateVVDOverlay(null, false);
+  };
+
+  const clearVVDOverlay = () => {
+    updateVVDOverlay('', false);
   };
 
   // Upload function for IndexedDB stored videos
@@ -6109,6 +6151,11 @@
       applyRecordingPayload(payload);
     });
 
+    state.socket.on('vvd:overlay', (payload) => {
+      if (!payload) return;
+      updateVVDOverlay(payload.text, payload.visible, payload.position);
+    });
+
     state.socket.on('upload:status', (payload) => {
       if (!payload) return;
       state.uploadStatus = payload.status;
@@ -6996,6 +7043,45 @@
   elements.recordingStop?.addEventListener('click', () => {
     if (!state.isHost) return;
     stopRecordingSession().catch(() => {});
+  });
+
+  // VVD Overlay Event Listeners
+  elements.vvdOverlayShow?.addEventListener('click', () => {
+    if (!state.isHost) return;
+    const text = elements.vvdOverlayText?.value?.trim() || '';
+    const position = elements.vvdOverlayPosition?.value || 'bottom-right';
+    if (text) {
+      showVVDOverlay(text, position);
+      // Broadcast to all participants
+      state.socket.emit('vvd:overlay', {
+        text,
+        visible: true,
+        position
+      });
+    }
+  });
+
+  elements.vvdOverlayHide?.addEventListener('click', () => {
+    if (!state.isHost) return;
+    hideVVDOverlay();
+    // Broadcast to all participants
+    state.socket.emit('vvd:overlay', {
+      text: state.vvdOverlay.text,
+      visible: false,
+      position: state.vvdOverlay.position
+    });
+  });
+
+  elements.vvdOverlayClear?.addEventListener('click', () => {
+    if (!state.isHost) return;
+    clearVVDOverlay();
+    elements.vvdOverlayText.value = '';
+    // Broadcast to all participants
+    state.socket.emit('vvd:overlay', {
+      text: '',
+      visible: false,
+      position: state.vvdOverlay.position
+    });
   });
 
   elements.quickRecord?.addEventListener('click', () => {

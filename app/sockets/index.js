@@ -691,6 +691,16 @@ module.exports = (io) => {
       }
     });
 
+    socket.on('vvd:overlay', async (payload) => {
+      try {
+        const { classCode, role } = socket.data || {};
+        if (!classCode || role !== 'host') return;
+        io.to(classCode).emit('vvd:overlay', payload);
+      } catch (error) {
+        console.error('vvd:overlay error', error);
+      }
+    });
+
     socket.on('disconnect', async () => {
       const { classMongoId, classCode, token, role } = socket.data || {};
       if (!classMongoId || role === 'host') {
