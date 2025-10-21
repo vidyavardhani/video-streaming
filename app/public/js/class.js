@@ -1690,6 +1690,10 @@
       this.toneManager = null;
     }
 
+    isMobileDevice() {
+      return window.innerWidth <= 768 || (window.innerHeight <= 500 && window.matchMedia('(orientation: landscape)').matches);
+    }
+
     attachToneManager(manager) {
       this.toneManager = manager;
     }
@@ -1713,6 +1717,16 @@
       this.unread += 1;
       this.sync();
       this.toneManager?.play('chat');
+      
+      // Auto-open chat on mobile devices when message is received
+      if (this.isMobileDevice()) {
+        // Use a small delay to ensure the UI is ready
+        setTimeout(() => {
+          if (typeof window.toggleDrawer === 'function') {
+            window.toggleDrawer('chat');
+          }
+        }, 100);
+      }
     }
 
     reset() {
@@ -3671,6 +3685,9 @@
       openDrawer(name);
     }
   };
+
+  // Make toggleDrawer available globally for ChatManager
+  window.toggleDrawer = toggleDrawer;
 
   const determineFileExtensionFromMime = (mimeType = '') => {
     if (!mimeType || typeof mimeType !== 'string') return 'webm';
@@ -7804,6 +7821,8 @@
       'quick-record': 'Record',
       'screen-share': 'Share Screen',
       'end-btn': 'End Class',
+      'stage-zoom-out': 'Zoom Out',
+      'stage-zoom-in': 'Zoom In',
       'control-more': 'More Options'
     };
 
@@ -7826,14 +7845,30 @@
         labelSpan.textContent = label;
         clone.appendChild(labelSpan);
         
-        // Copy event listeners by re-attaching them
-        clone.addEventListener('click', (e) => {
-          e.preventDefault();
-          button.click();
-          
-          // Close menu instantly after any action so user can see the result
-          closeMobileMenu();
-        });
+        // Special handling for "More Options" button
+        if (button.id === 'control-more') {
+          clone.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Close mobile menu first
+            closeMobileMenu();
+            
+            // Then open the more options menu after a short delay
+            setTimeout(() => {
+              toggleMoreMenu(true);
+            }, 100);
+          });
+        } else {
+          // Copy event listeners by re-attaching them for other buttons
+          clone.addEventListener('click', (e) => {
+            e.preventDefault();
+            button.click();
+            
+            // Close menu instantly after any action so user can see the result
+            closeMobileMenu();
+          });
+        }
         
         mobileMenuGrid.appendChild(clone);
       });

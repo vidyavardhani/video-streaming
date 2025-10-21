@@ -368,6 +368,25 @@
           </svg>
         </span>
       </button>
+
+              <!-- Zoom Controls -->
+              <button id="stage-zoom-out" class="control-btn host-only" type="button" aria-label="Zoom out" data-tooltip="Zoom out">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+                    <path d="M8.5 12h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                  </svg>
+                </span>
+              </button>
+              <button id="stage-zoom-in" class="control-btn host-only" type="button" aria-label="Zoom in" data-tooltip="Zoom in">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+                    <path d="M8.5 12h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                    <path d="M12 8.5v7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                  </svg>
+                </span>
+              </button>
                
               <button id="control-more" class="control-btn" type="button" aria-label="More options" aria-controls="control-more-menu" aria-haspopup="true" aria-expanded="false" data-tooltip="More">
                 <span class="icon">
@@ -439,27 +458,6 @@
               </span>
               <span class="text">Whiteboard</span>
             </button> -->
-            <div class="menu-inline host-only" role="group" aria-label="Stage zoom controls">
-              <button id="stage-zoom-out" class="menu-btn" type="button" role="menuitem" data-tooltip="Zoom out">
-                <span class="icon">
-                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
-                    <path d="M8.5 12h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
-                  </svg>
-                </span>
-                <span class="text">Zoom-out</span>
-              </button>
-              <button id="stage-zoom-in" class="menu-btn" type="button" role="menuitem" data-tooltip="Zoom in">
-                <span class="icon">
-                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
-                    <path d="M8.5 12h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
-                    <path d="M12 8.5v7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
-                  </svg>
-                </span>
-                <span class="text">Zoom-in</span>
-              </button>
-            </div>
             <div id="tone-settings" class="menu-section host-only" role="group" aria-label="Host settings">
               <p class="menu-section-title">Host settings</p>
               <label class="tone-toggle" for="tone-toggle">

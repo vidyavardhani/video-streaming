@@ -544,3 +544,22 @@ Found 0 uploading/recent videos
 [0mGET /admin/uploading-videos [36m304[0m 83.250 ms - -[0m
 Found 0 uploading/recent videos
 [0mGET /admin/uploading-videos [36m304[0m 77.810 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 83.330 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 105.293 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 68.231 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 72.953 ms - -[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 152.362 ms - -[0m
+[0mGET /dashboard [36m304[0m 39.334 ms - -[0m
+[0mGET /public/js/developerPanel.js [36m304[0m 0.789 ms - -[0m
+[0mGET /public/js/dashboard.js [36m304[0m 0.650 ms - -[0m
+[0mGET /public/css/style.css [32m200[0m 1.461 ms - 87982[0m
+Found 0 uploading/recent videos
+[0mGET /admin/uploading-videos [36m304[0m 57.146 ms - -[0m
+[0mGET /auth/me [36m304[0m 64.040 ms - -[0m
+[0mGET /classes/mine [32m200[0m 153.410 ms - 71696[0m
+[0mGET /api/developer/summary [32m200[0m 142.646 ms - 12375[0m
