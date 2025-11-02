@@ -44,7 +44,11 @@ const classSchema = new mongoose.Schema({
     default: []
   },
   startTime: Date,
-  endTime: Date
+  endTime: Date,
+  recordingUrl: {
+    type: String,
+    default: null
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Class', classSchema);

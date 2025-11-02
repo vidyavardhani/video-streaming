@@ -242,3 +242,27 @@ exports.getLiveClasses = async (req, res) => {
     res.status(500).json({ message: 'Failed to get live classes' });
   }
 };
+
+exports.updateRecordingUrl = async (req, res) => {
+  try {
+    const { recordingUrl } = req.body;
+    const classItem = await ClassModel.findById(req.params.id);
+    
+    if (!classItem) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+    
+    // Validate that it's a full URL (not just a path)
+    if (recordingUrl && !recordingUrl.startsWith('http://') && !recordingUrl.startsWith('https://')) {
+      return res.status(400).json({ message: 'Recording URL must be a full URL (starting with http:// or https://)' });
+    }
+    
+    classItem.recordingUrl = recordingUrl;
+    await classItem.save();
+    
+    res.json({ message: 'Recording URL updated', class: classItem });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to update recording URL' });
+  }
+};

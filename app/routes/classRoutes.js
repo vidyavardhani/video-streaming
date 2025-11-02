@@ -19,6 +19,7 @@ router.patch('/:id/end', authMiddleware, classController.endClass);
 router.post('/:id/join', authMiddleware, classController.joinClass);
 router.post('/:id/admit', authMiddleware, classController.admitStudent);
 router.post('/:id/remove', authMiddleware, classController.removeStudent);
+router.patch('/:id/recording', authMiddleware, classController.updateRecordingUrl);
 router.get('/:id', authMiddleware, classController.getClassDetails);
 
 module.exports = router;
