@@ -1,20 +1,25 @@
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const fsp = require('fs/promises');
 const path = require('path');
+const dotenv = require('dotenv');
+dotenv.config();
 
-const region = process.env.AWS_REGION || 'us-east-1';
+const region = process.env.AWS_REGION || 'ap-southeast-2';
 const bucket = process.env.AWS_S3_BUCKET_NAME;
 const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 
+const hasAwsConfig = !!(bucket && accessKeyId && secretAccessKey);
+
 let s3Client = null;
-if (bucket && accessKeyId && secretAccessKey) {
+if (hasAwsConfig) {
   s3Client = new S3Client({
     region,
     credentials: {
       accessKeyId,
       secretAccessKey
-    }
+    },
+    maxAttempts: 3
   });
 }
 
@@ -48,19 +53,29 @@ const normalizeMimeType = (mimeType) => {
   return mimeType.trim().toLowerCase();
 };
 
-// Upload to S3
 const uploadToS3 = async (key, buffer, mimeType) => {
   if (!s3Client) {
-    throw new Error('S3 client not configured');
+    throw new Error('S3 client not configured. Please set AWS_S3_BUCKET_NAME, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY environment variables.');
   }
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: normalizeMimeType(mimeType)
-    })
-  );
+
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: normalizeMimeType(mimeType),
+    Metadata: {
+      uploadedAt: new Date().toISOString(),
+      fileSize: buffer.length.toString()
+    }
+  });
+
+  const uploadPromise = s3Client.send(command);
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Upload timeout after 5 minutes')), 300000);
+  });
+
+  await Promise.race([uploadPromise, timeoutPromise]);
+
   return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 };
 
@@ -102,8 +117,6 @@ const queueUpload = async (jobData) => {
   uploadQueue.push(job);
   activeUploads.set(classId, job);
 
-  console.log(`Upload job queued for class ${meetingCode} (${classId})`);
-
   // Emit status update
   if (io) {
     io.to(meetingCode).emit('upload:status', {
@@ -132,8 +145,6 @@ const processQueue = async () => {
     const job = uploadQueue.shift();
     
     try {
-      console.log(`Processing upload job for class ${job.meetingCode} (attempt ${job.attempts + 1}/${job.maxAttempts})`);
-      
       job.status = UploadStatus.UPLOADING;
       job.attempts += 1;
       job.uploadStartedAt = new Date();
@@ -153,18 +164,21 @@ const processQueue = async () => {
 
       try {
         uploadUrl = await uploadToS3(job.fileKey, job.buffer, job.mimeType);
-        console.log(`Successfully uploaded to S3: ${uploadUrl}`);
       } catch (s3Error) {
-        console.error('S3 upload failed, falling back to local storage:', s3Error);
         uploadError = s3Error;
         
-        // Fallback to local storage
-        try {
-          uploadUrl = await saveLocalRecording(job.fileKey, job.buffer);
-          console.log(`Saved to local storage: ${uploadUrl}`);
-        } catch (localError) {
-          console.error('Local storage also failed:', localError);
-          throw localError;
+        const isConfigError = s3Error.message.includes('not configured') || 
+                             s3Error.message.includes('credentials') ||
+                             s3Error.message.includes('InvalidAccessKeyId');
+        
+        if (isConfigError || job.attempts >= job.maxAttempts) {
+          try {
+            uploadUrl = await saveLocalRecording(job.fileKey, job.buffer);
+          } catch (localError) {
+            throw localError;
+          }
+        } else {
+          throw s3Error;
         }
       }
 
@@ -189,30 +203,30 @@ const processQueue = async () => {
         });
       }
 
-      console.log(`Upload job completed for class ${job.meetingCode}`);
-
       // Update the class model
       await updateClassWithUploadResult(job);
 
     } catch (error) {
-      console.error(`Upload job failed for class ${job.meetingCode}:`, error);
+      const errorMessage = error.message || 'Unknown error';
+      const errorCode = error.Code || error.code || 'UNKNOWN';
       
-      job.error = error.message;
+      job.error = errorMessage;
+      job.errorCode = errorCode;
 
-      // Retry if attempts remain
       if (job.attempts < job.maxAttempts) {
-        console.log(`Retrying upload for class ${job.meetingCode} (attempt ${job.attempts + 1}/${job.maxAttempts})`);
+        const retryDelay = Math.min(1000 * Math.pow(2, job.attempts - 1), 10000);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        
         uploadQueue.push(job);
         
         if (io) {
           io.to(job.meetingCode).emit('upload:status', {
             status: UploadStatus.QUEUED,
             message: `Upload failed, retrying... (attempt ${job.attempts}/${job.maxAttempts})`,
-            error: error.message
+            error: errorMessage
           });
         }
       } else {
-        // Mark as failed after max attempts
         job.status = UploadStatus.FAILED;
         job.failedAt = new Date();
 
@@ -220,16 +234,19 @@ const processQueue = async () => {
           io.to(job.meetingCode).emit('upload:status', {
             status: UploadStatus.FAILED,
             message: 'Video upload failed after multiple attempts',
-            error: error.message
+            error: errorMessage
           });
         }
 
-        // Update class model with failure
         await updateClassWithUploadResult(job);
+      }
+    } finally {
+      // Ensure isProcessing is reset even if there's an unexpected error
+      if (uploadQueue.length === 0) {
+        isProcessing = false;
       }
     }
 
-    // Small delay between jobs
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
@@ -243,7 +260,6 @@ const updateClassWithUploadResult = async (job) => {
     const klass = await Class.findById(job.classId);
     
     if (!klass) {
-      console.error(`Class not found for upload job: ${job.classId}`);
       return;
     }
 
@@ -263,13 +279,12 @@ const updateClassWithUploadResult = async (job) => {
     }
 
     await klass.save();
-    console.log(`Class ${job.meetingCode} updated with upload result`);
 
     // Remove from active uploads
     activeUploads.delete(job.classId);
 
   } catch (error) {
-    console.error('Error updating class with upload result:', error);
+    // Silent error handling
   }
 };
 
