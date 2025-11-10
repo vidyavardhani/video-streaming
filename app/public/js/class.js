@@ -3,6 +3,7 @@
   if (!root) return;
 
   const classCode = root.dataset.classCode;
+  const roleHintFromDataset = (root.dataset.role || '').trim().toLowerCase();
   const hostTokenFromDataset = (root.dataset.hostToken || '').trim();
   const prefillNameFromDataset = root.dataset.prefillName || '';
   const tokenKey = 'vs_token';
@@ -160,7 +161,8 @@
     layout: 'landscape',
     controlsVisible: true,
     controlsTimer: null,
-    controlsHideDelay: 1200
+    controlsHideDelay: 1200,
+    roleHint: roleHintFromDataset
   };
 
   state.mediaStates.set('host', { audio: false, video: false });
@@ -172,6 +174,30 @@
   if (initialHostToken) {
     state.hostToken = initialHostToken;
   }
+
+  const teacherRoleHints = new Set(['teacher', 'faculty', 'host', 'admin', 'instructor']);
+
+  const resolveRoleHint = () => {
+    const explicitRole = (state.roleHint || '').trim().toLowerCase();
+    if (explicitRole) return explicitRole;
+    const userRole = (state.user?.role || '').trim().toLowerCase();
+    if (userRole) return userRole;
+    return '';
+  };
+
+  const determineDashboardTarget = (normalizedRole) => {
+    if (!normalizedRole) return 'HomeScreen';
+    if (normalizedRole === 'student' || normalizedRole === 'learner') {
+      return 'StudentDashboard';
+    }
+    if (teacherRoleHints.has(normalizedRole)) {
+      return 'HomeScreen';
+    }
+    if (normalizedRole.includes('student')) {
+      return 'StudentDashboard';
+    }
+    return 'HomeScreen';
+  };
 
   const applyHostAuth = (options = {}) => {
     if (!state.hostToken) {
@@ -1192,6 +1218,7 @@
     hostLobbyView: document.getElementById('host-lobby'),
     liveView: document.getElementById('live-view'),
     endedView: document.getElementById('ended-view'),
+    returnDashboard: document.getElementById('return-dashboard'),
     previewVideo: document.getElementById('preview-video'),
     previewWrapper: document.querySelector('.preview-video-wrapper'),
     previewControls: document.querySelector('.preview-controls'),
@@ -5570,6 +5597,10 @@
       const res = await fetch('/auth/me');
       if (!res.ok) return;
       state.user = await res.json();
+      const normalizedRole = (state.user?.role || '').trim().toLowerCase();
+      if (normalizedRole && !state.roleHint) {
+        state.roleHint = normalizedRole;
+      }
     } catch (error) {
       state.user = null;
     }
@@ -5918,7 +5949,14 @@
       refreshStage();
     });
 
-    state.socket.on('class:ended', () => {
+    state.socket.on('class:ended', async () => {
+      if (state.isHost && state.recording?.isRecording) {
+        try {
+          await stopRecordingSession();
+        } catch (error) {
+          console.error('Failed to finalize recording after class ended', error);
+        }
+      }
       if (state.classInfo) {
         state.classInfo.status = 'ended';
       }
@@ -6844,6 +6882,13 @@
       confirmText: 'End for all'
     });
     if (!confirmed) return;
+    if (state.isHost && state.recording?.isRecording) {
+      try {
+        await stopRecordingSession();
+      } catch (error) {
+        console.error('Failed to stop recording before ending class', error);
+      }
+    }
     await fetch(`/classes/${classCode}/end`, applyHostAuth({ method: 'PATCH' }));
     leaveSession();
     setView('endedView');
@@ -6874,6 +6919,28 @@
     resetRejoinButtons();
     setView('joinView');
     closeMoreMenu();
+  });
+
+  elements.returnDashboard?.addEventListener('click', (event) => {
+    const bridge = window.ReactNativeWebView;
+    const canPostMessage = bridge && typeof bridge.postMessage === 'function';
+    if (!canPostMessage) {
+      return;
+    }
+    event.preventDefault();
+    const role = resolveRoleHint();
+    const targetScreen = determineDashboardTarget(role);
+    const payload = {
+      type: 'NAVIGATE_DASHBOARD',
+      role,
+      targetScreen
+    };
+    try {
+      bridge.postMessage(JSON.stringify(payload));
+    } catch (error) {
+      const fallbackHref = event.currentTarget.getAttribute('href') || '/';
+      window.location.assign(fallbackHref);
+    }
   });
 
   elements.copyLink?.addEventListener('click', async (e) => {
