@@ -57,9 +57,26 @@
   let isHost = false;
   let participants = new Map();
   const peers = new Map();
+  let hostSocketId = null;
+  let teacherStream = null;
+  const leafPeers = new Set();
+  const leafPcs = new Map();
+  let myRelaySocketId = null;
   const rtcConfig = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   };
+
+  async function loadIceServers() {
+    if (!token) return;
+    try {
+      const data = await fetchJSON('/api/webrtc/ice-servers');
+      if (data.iceServers && data.iceServers.length) {
+        rtcConfig.iceServers = data.iceServers;
+      }
+    } catch (err) {
+      console.warn('ICE servers fetch failed, using STUN only', err);
+    }
+  }
 
   function setPanel(name) {
     Object.values(panels).forEach((panel) => panel.classList.remove('active'));
@@ -189,6 +206,7 @@
       ]);
       currentUser = user;
       classData = klass;
+      await loadIceServers();
       isHost = currentUser && classData.host && currentUser.id === classData.host._id;
       app.classList.toggle('host', isHost);
       userNameEl.textContent = currentUser.name;
@@ -239,6 +257,19 @@
       }
     });
 
+    socket.on('host-socket-id', ({ hostSocketId: id }) => {
+      hostSocketId = id;
+    });
+
+    socket.on('your-relay-is', ({ relaySocketId }) => {
+      myRelaySocketId = relaySocketId;
+    });
+
+    socket.on('relay-add-leaf', ({ leafSocketId }) => {
+      leafPeers.add(leafSocketId);
+      callLeaf(leafSocketId);
+    });
+
     socket.on('participant-admitted', (participant) => {
       if (!participant) return;
       const id = participant.user?.toString?.() || participant.user || participant.displayName;
@@ -250,7 +281,7 @@
         classData.participants.push(participant);
         updateParticipantsUI(classData.participants);
         renderLobby(classData?.lobby || []);
-        if (participant.socketId) {
+        if (participant.socketId && participant.isRelay) {
           callParticipant(participant.socketId);
         }
       }
@@ -293,6 +324,12 @@
       if (userId) {
         participants.delete(userId);
       }
+      const leafPc = leafPcs.get(socketId);
+      if (leafPc) {
+        leafPc.close();
+        leafPcs.delete(socketId);
+        leafPeers.delete(socketId);
+      }
       detachRemoteStream(socketId);
       if (classData) {
         classData.participants = (classData.participants || []).filter((p) => {
@@ -307,19 +344,20 @@
       if (payload.type === 'offer') {
         const pc = createPeerConnection(from, false);
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-        if (localStream) {
+        const isLeafReceivingFromRelay = myRelaySocketId && from === myRelaySocketId;
+        if (localStream && !isLeafReceivingFromRelay) {
           localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
         }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit('signal', { target: from, payload: { type: 'answer', sdp: answer } });
       } else if (payload.type === 'answer') {
-        const pc = peers.get(from);
+        const pc = peers.get(from) || leafPcs.get(from);
         if (pc) {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         }
       } else if (payload.type === 'candidate') {
-        const pc = peers.get(from);
+        const pc = peers.get(from) || leafPcs.get(from);
         if (pc && payload.candidate) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
@@ -360,6 +398,10 @@
 
     pc.ontrack = (event) => {
       attachRemoteStream(targetId, event.streams[0]);
+      if (targetId === hostSocketId && event.streams[0]) {
+        teacherStream = event.streams[0];
+        leafPeers.forEach((leafId) => callLeaf(leafId));
+      }
     };
 
     pc.onconnectionstatechange = () => {
@@ -374,6 +416,31 @@
     }
 
     return pc;
+  }
+
+  async function callLeaf(leafSocketId) {
+    if (!teacherStream || leafPcs.has(leafSocketId)) return;
+    const pc = new RTCPeerConnection(rtcConfig);
+    leafPcs.set(leafSocketId, pc);
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('signal', {
+          target: leafSocketId,
+          payload: { type: 'candidate', candidate: event.candidate }
+        });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (['failed', 'closed'].includes(pc.connectionState)) {
+        leafPcs.delete(leafSocketId);
+        leafPeers.delete(leafSocketId);
+        detachRemoteStream(leafSocketId);
+      }
+    };
+    teacherStream.getTracks().forEach((track) => pc.addTrack(track, teacherStream));
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit('signal', { target: leafSocketId, payload: { type: 'offer', sdp: offer } });
   }
 
   async function callParticipant(targetId) {
@@ -463,6 +530,12 @@
   function tearDownSession() {
     peers.forEach((pc) => pc.close());
     peers.clear();
+    leafPcs.forEach((pc) => pc.close());
+    leafPcs.clear();
+    leafPeers.clear();
+    teacherStream = null;
+    hostSocketId = null;
+    myRelaySocketId = null;
     participants.clear();
     if (screenStream) {
       screenStream.getTracks().forEach((track) => track.stop());

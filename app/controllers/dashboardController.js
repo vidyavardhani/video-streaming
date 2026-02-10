@@ -1,13 +1,14 @@
 const User = require('../models/User');
 const ClassModel = require('../models/Class');
 const Chat = require('../models/Chat');
+const logger = require('../../config/logger');
 
 exports.listUsers = async (req, res) => {
   try {
     const users = await User.find().select('-password');
     res.json(users);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to load users' });
   }
 };
@@ -17,7 +18,7 @@ exports.listLiveUsers = async (req, res) => {
     const users = await User.find({ status: 'online' }).select('-password');
     res.json(users);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to load live users' });
   }
 };
@@ -35,7 +36,7 @@ exports.analyticsOverview = async (req, res) => {
       runningClasses
     });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to load analytics' });
   }
 };
@@ -45,7 +46,7 @@ exports.classChatLogs = async (req, res) => {
     const messages = await Chat.find({ class: req.params.classId }).sort({ createdAt: 1 });
     res.json(messages);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to load chat logs' });
   }
 };

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const config = require('../../config/config');
 
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -8,7 +9,7 @@ const authMiddleware = async (req, res, next) => {
   }
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const decoded = jwt.verify(token, config.JWT_SECRET);
     const user = await User.findById(decoded.id);
     if (!user) {
       return res.status(401).json({ message: 'User not found' });

@@ -31,4 +31,7 @@ const userSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+userSchema.index({ email: 1 });
+userSchema.index({ status: 1, currentClass: 1 });
+
 module.exports = mongoose.model('User', userSchema);

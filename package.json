@@ -6,7 +6,12 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "stage": "NODE_ENV=staging nodemon server.js",
+    "prod": "NODE_ENV=production nodemon server.js",
+    "seed": "node jmeter/scripts/seed-for-jmeter.js",
+    "seed:stage": "NODE_ENV=staging node jmeter/scripts/seed-for-jmeter.js",
+    "seed:prod": "NODE_ENV=production node jmeter/scripts/seed-for-jmeter.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

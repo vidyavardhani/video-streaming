@@ -2,9 +2,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
+const config = require('../../config/config');
+const logger = require('../../config/logger');
 
 const generateToken = (user) => {
-  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET || 'secret', {
+  return jwt.sign({ id: user._id, role: user.role }, config.JWT_SECRET, {
     expiresIn: '7d'
   });
 };
@@ -38,7 +40,7 @@ exports.register = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Registration failed' });
   }
 };
@@ -69,7 +71,7 @@ exports.login = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Login failed' });
   }
 };

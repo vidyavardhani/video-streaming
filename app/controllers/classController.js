@@ -2,6 +2,8 @@ const { validationResult } = require('express-validator');
 const ClassModel = require('../models/Class');
 const User = require('../models/User');
 const { getIO } = require('../sockets/io');
+const config = require('../../config/config');
+const logger = require('../../config/logger');
 
 const generateMeetingCode = () => {
   const digits = Math.floor(100000000 + Math.random() * 900000000).toString();
@@ -25,7 +27,7 @@ exports.createClass = async (req, res) => {
       host: host._id,
       meetingCode
     });
-    newClass.meetingLink = `${process.env.BASE_URL || 'http://localhost:4000'}/class/${newClass._id}`;
+    newClass.meetingLink = `${config.BASE_URL}/class/${newClass._id}`;
     await newClass.save();
     let io;
     try {
@@ -42,7 +44,7 @@ exports.createClass = async (req, res) => {
       io.to(host._id.toString()).emit('class-created', newClass);
     }
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to create class' });
   }
 };
@@ -70,7 +72,7 @@ exports.startClass = async (req, res) => {
     }
     res.json({ message: 'Class started', class: classItem });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to start class' });
   }
 };
@@ -104,7 +106,7 @@ exports.endClass = async (req, res) => {
     }
     res.json({ message: 'Class ended' });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to end class' });
   }
 };
@@ -137,7 +139,7 @@ exports.joinClass = async (req, res) => {
     }
     res.json({ message: 'Request sent to host', lobby: classItem.lobby });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to join class' });
   }
 };
@@ -161,6 +163,9 @@ exports.admitStudent = async (req, res) => {
     classItem.participants.push(lobbyEntry);
     await classItem.save();
     await User.findByIdAndUpdate(lobbyEntry.user, { status: 'online', currentClass: classItem._id });
+    const isRelay = classItem.participants.length <= 6;
+    const lobbyData = typeof lobbyEntry.toObject === 'function' ? lobbyEntry.toObject() : { ...lobbyEntry };
+    const payload = { ...lobbyData, isRelay };
     let io;
     try {
       io = getIO();
@@ -168,13 +173,86 @@ exports.admitStudent = async (req, res) => {
       io = null;
     }
     if (io) {
-      io.to(classItem._id.toString()).emit('participant-admitted', lobbyEntry);
+      io.to(classItem._id.toString()).emit('participant-admitted', payload);
       io.to(classItem.host.toString()).emit('lobby-update', classItem.lobby);
+      if (!isRelay && lobbyEntry.socketId) {
+        const relayIndex = (classItem.participants.length - 1 - 6) % 6;
+        const relayParticipant = classItem.participants[relayIndex];
+        const relaySocketId = relayParticipant && relayParticipant.socketId;
+        if (relaySocketId) {
+          io.to(relaySocketId).emit('relay-add-leaf', { leafSocketId: lobbyEntry.socketId });
+          io.to(lobbyEntry.socketId).emit('your-relay-is', { relaySocketId });
+        }
+      }
     }
     res.json({ message: 'Student admitted', participants: classItem.participants });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to admit student' });
+  }
+};
+
+exports.admitStudentsBatch = async (req, res) => {
+  const validationErrors = validationResult(req);
+  if (!validationErrors.isEmpty()) {
+    return res.status(400).json({ errors: validationErrors.array() });
+  }
+  const { studentIds } = req.body;
+  try {
+    const classItem = await ClassModel.findById(req.params.id);
+    if (!classItem) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+    if (classItem.host.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Only host can admit students' });
+    }
+    let io;
+    try {
+      io = getIO();
+    } catch (error) {
+      io = null;
+    }
+    const admitted = [];
+    const errors = [];
+    for (const studentId of studentIds) {
+      const lobbyIndex = classItem.lobby.findIndex(
+        (item) => (item.user && item.user.toString() === studentId) || item.displayName === studentId
+      );
+      if (lobbyIndex === -1) {
+        errors.push({ studentId, message: 'Not in lobby' });
+        continue;
+      }
+      const lobbyEntry = classItem.lobby.splice(lobbyIndex, 1)[0];
+      lobbyEntry.status = 'admitted';
+      classItem.participants.push(lobbyEntry);
+      await User.findByIdAndUpdate(lobbyEntry.user, { status: 'online', currentClass: classItem._id });
+      const isRelay = classItem.participants.length <= 6;
+      const lobbyData = typeof lobbyEntry.toObject === 'function' ? lobbyEntry.toObject() : { ...lobbyEntry };
+      const payload = { ...lobbyData, isRelay };
+      if (io) {
+        io.to(classItem._id.toString()).emit('participant-admitted', payload);
+        io.to(classItem.host.toString()).emit('lobby-update', classItem.lobby);
+        if (!isRelay && lobbyEntry.socketId) {
+          const relayIndex = (classItem.participants.length - 1 - 6) % 6;
+          const relayParticipant = classItem.participants[relayIndex];
+          const relaySocketId = relayParticipant && relayParticipant.socketId;
+          if (relaySocketId) {
+            io.to(relaySocketId).emit('relay-add-leaf', { leafSocketId: lobbyEntry.socketId });
+            io.to(lobbyEntry.socketId).emit('your-relay-is', { relaySocketId });
+          }
+        }
+      }
+      admitted.push(studentId);
+    }
+    await classItem.save();
+    res.json({
+      message: 'Batch admit completed',
+      admitted,
+      errors: errors.length ? errors : undefined
+    });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ message: 'Failed to admit students' });
   }
 };
 
@@ -212,7 +290,7 @@ exports.removeStudent = async (req, res) => {
     }
     res.json({ message: 'Student removed', participants: classItem.participants });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to remove student' });
   }
 };
@@ -227,7 +305,7 @@ exports.getClassDetails = async (req, res) => {
     }
     res.json(classItem);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to get class details' });
   }
 };
@@ -238,7 +316,7 @@ exports.getLiveClasses = async (req, res) => {
       .populate('host', 'name email');
     res.json(classes);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to get live classes' });
   }
 };
@@ -262,7 +340,7 @@ exports.updateRecordingUrl = async (req, res) => {
     
     res.json({ message: 'Recording URL updated', class: classItem });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to update recording URL' });
   }
 };

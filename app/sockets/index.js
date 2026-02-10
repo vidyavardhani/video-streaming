@@ -2,6 +2,7 @@ const ClassModel = require('../models/Class');
 const Chat = require('../models/Chat');
 const User = require('../models/User');
 const { init } = require('./io');
+const logger = require('../../config/logger');
 
 const activeUsers = new Map();
 
@@ -49,11 +50,14 @@ module.exports = (io) => {
           role
         });
 
+        if (classItem.host && userId === classItem.host.toString()) {
+          io.to(classId).emit('host-socket-id', { hostSocketId: socket.id });
+        }
         if (classItem.host) {
           io.to(classItem.host.toString()).emit('lobby-update', classItem.lobby);
         }
       } catch (error) {
-        console.error('joinRoom error', error);
+        logger.error('joinRoom error', error);
         socket.emit('error', { message: 'Failed to join room' });
       }
     });
@@ -70,7 +74,7 @@ module.exports = (io) => {
         });
         io.to(classId).emit('messageCreated', chat);
       } catch (error) {
-        console.error('newMessage error', error);
+        logger.error('newMessage error', error);
       }
     });
 
@@ -79,7 +83,7 @@ module.exports = (io) => {
         await Chat.findByIdAndDelete(msgId);
         io.to(classId).emit('messageRemoved', { msgId });
       } catch (error) {
-        console.error('removeMessage error', error);
+        logger.error('removeMessage error', error);
       }
     });
 

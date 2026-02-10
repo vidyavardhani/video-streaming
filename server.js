@@ -1,17 +1,16 @@
 const path = require('path');
 const http = require('http');
 const express = require('express');
-const mongoose = require('mongoose');
 const morgan = require('morgan');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const swaggerUi = require('swagger-ui-express');
 const docs = require('./docs/swagger');
 
+const config = require('./config/config');
+const logger = require('./config/logger');
+const { connectDB } = require('./config/db');
 const registerSocketHandlers = require('./app/sockets');
 const webrtcSignaling = require('./app/webrtc');
-
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
@@ -33,26 +32,23 @@ app.set('views', path.join(__dirname, 'app/views'));
 app.set('view engine', 'ejs');
 app.use('/public', express.static(path.join(__dirname, 'app/public')));
 
+// Log resolved env config at startup
+logger.logEnvConfig(config);
+
 // Database connection
-const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/video-streaming';
-mongoose.connect(mongoUri, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => {
-  console.log('Connected to MongoDB');
-}).catch((err) => {
-  console.error('MongoDB connection error:', err.message);
-});
+connectDB();
 
 // Routes
 const authRoutes = require('./app/routes/authRoutes');
 const classRoutes = require('./app/routes/classRoutes');
 const chatRoutes = require('./app/routes/chatRoutes');
 const dashboardRoutes = require('./app/routes/dashboardRoutes');
+const webrtcRoutes = require('./app/routes/webrtcRoutes');
 
 app.use('/auth', authRoutes);
 app.use('/classes', classRoutes);
 app.use('/chat', chatRoutes);
+app.use('/api/webrtc', webrtcRoutes);
 app.use('/', dashboardRoutes);
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(docs));
 
@@ -74,7 +70,6 @@ app.get('/class/:id/end', (req, res) => {
 registerSocketHandlers(io);
 webrtcSignaling(io);
 
-const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+server.listen(config.PORT, () => {
+  logger.info(`Server listening on port ${config.PORT}`);
 });

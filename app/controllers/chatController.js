@@ -1,6 +1,7 @@
 const Chat = require('../models/Chat');
 const ClassModel = require('../models/Class');
 const { getIO } = require('../sockets/io');
+const logger = require('../../config/logger');
 
 exports.sendMessage = async (req, res) => {
   try {
@@ -25,7 +26,7 @@ exports.sendMessage = async (req, res) => {
     }
     res.status(201).json(chat);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to send message' });
   }
 };
@@ -36,7 +37,7 @@ exports.getMessages = async (req, res) => {
       .sort({ createdAt: 1 });
     res.json(messages);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to fetch messages' });
   }
 };
@@ -62,7 +63,7 @@ exports.deleteMessage = async (req, res) => {
     }
     res.json({ message: 'Message removed' });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ message: 'Failed to delete message' });
   }
 };
