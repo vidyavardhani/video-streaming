@@ -113,9 +113,11 @@ Adjust loop counts and thread counts to match 50 vs 100 attendees and 100 users.
 
 ## 5. Key HTTP Details
 
+**Important:** All POST/PATCH requests that send a JSON body must include the header `Content-Type: application/json` so the server parses the body. The JMX includes Header Manager for this where needed.
+
 | Action        | Method | Path                          | Body / Headers |
 |---------------|--------|-------------------------------|-----------------|
-| Login         | POST   | `/auth/login`                 | `{"email","password"}` |
+| Login         | POST   | `/auth/login`                 | `Content-Type: application/json` + `{"email","password"}` |
 | Get class     | GET    | `/classes/${classId}`        | `Authorization: Bearer <token>` |
 | Start class   | PATCH  | `/classes/${classId}/start`  | `Authorization: Bearer <token>` |
 | Join class    | POST   | `/classes/${classId}/join`   | `{"displayName":"..."}`, Bearer |
@@ -124,7 +126,68 @@ Adjust loop counts and thread counts to match 50 vs 100 attendees and 100 users.
 
 Extract the JWT from the login response (e.g. `token` or `$.token`) and use it as `Authorization: Bearer ${token}` for all class and chat requests.
 
-## 6. What to Watch
+## 6. Analyzing results (results.jtl)
+
+When you run JMeter in CLI mode with `-l results.jtl`, you get a CSV of every sample. Here’s how to use it.
+
+### Columns in the JTL (typical)
+
+| Column         | Meaning |
+|----------------|--------|
+| timeStamp      | Unix ms when the request ended |
+| elapsed        | Response time in ms |
+| label          | Sampler name (e.g. "Student Login", "Get Class") |
+| responseCode   | HTTP status (200, 400, 401, etc.) |
+| responseMessage| Short status text |
+| success        | true/false |
+| bytes          | Response body size (bytes) |
+| URL            | Full request URL |
+
+### Option A: JMeter HTML report (recommended)
+
+Generate a report from the JTL. **The output folder must be empty or not exist** (JMeter will not overwrite an existing report folder):
+
+```bash
+cd jmeter
+# Remove previous report so JMeter can write (Windows PowerShell)
+if (Test-Path report) { Remove-Item -Recurse -Force report }
+jmeter -g results.jtl -o report
+```
+
+Or use a new folder each time: `jmeter -g results.jtl -o report-$(Get-Date -Format 'yyyyMMdd-HHmm')` (PowerShell) or `report-$(date +%Y%m%d-%H%M)` (bash). Then open `report/index.html` in a browser. You get:
+
+- Summary (count, error %, throughput, response time percentiles)
+- Charts (response times over time, throughput, etc.)
+- Breakdown by request label
+
+### Option B: Summary script (this repo)
+
+From project root:
+
+```bash
+node jmeter/scripts/analyze-jtl.js jmeter/results.jtl
+```
+
+Or from `jmeter/`:
+
+```bash
+node scripts/analyze-jtl.js results.jtl
+```
+
+This prints per-label: count, OK/fail, min/avg/max/p95/p99 response time (ms), and response code distribution.
+
+### Option C: JMeter GUI
+
+1. Open the same JMX.
+2. Add a **View Results Tree** or **Summary Report** under the Test Plan.
+3. In the listener, set **Filename** to your `results.jtl`.
+4. Load the file: the listener will show tables and (for View Results Tree) request/response details.
+
+### Option D: Spreadsheet or script
+
+The JTL is CSV. Open it in Excel/Sheets or parse it with any script: group by `label`, then aggregate `elapsed`, `success`, and `responseCode` to get throughput, error rate, and percentiles.
+
+## 7. What to Watch
 
 - **Response times**: login, get class, start, admit (or admit-batch).
 - **Throughput**: requests per second.
@@ -132,7 +195,7 @@ Extract the JWT from the login response (e.g. `token` or `$.token`) and use it a
 - **Socket.IO**: number of concurrent connections and events per second (if using a plugin).
 - **Server**: Node process and MongoDB (CPU, memory, connection count).
 
-## 7. Limits
+## 8. Limits
 
 - **100 users × 50/100 attendees** is mainly **HTTP + optional Socket.IO** load; JMeter is suitable.
 - **WebRTC media** (actual video/audio) cannot be simulated with JMeter; use browser-based tests or real users for that.

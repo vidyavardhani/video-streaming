@@ -1,0 +1,36 @@
+2026-02-11 03:11:59,921 INFO o.a.j.u.JMeterUtils: Setting Locale to en_EN
+2026-02-11 03:11:59,940 INFO o.a.j.JMeter: Loading user properties from: C:\Program Files\apache-jmeter-5.6.3\bin\user.properties
+2026-02-11 03:11:59,941 INFO o.a.j.JMeter: Loading system properties from: C:\Program Files\apache-jmeter-5.6.3\bin\system.properties
+2026-02-11 03:11:59,950 INFO o.a.j.JMeter: Copyright (c) 1998-2024 The Apache Software Foundation
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: Version 5.6.3
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: java.version=25.0.2
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: java.vm.name=Java HotSpot(TM) 64-Bit Server VM
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: os.name=Windows 11
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: os.arch=amd64
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: os.version=10.0
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: file.encoding=UTF-8
+2026-02-11 03:11:59,951 INFO o.a.j.JMeter: java.awt.headless=null
+2026-02-11 03:11:59,952 INFO o.a.j.JMeter: Max memory     =1073741824
+2026-02-11 03:11:59,952 INFO o.a.j.JMeter: Available Processors =8
+2026-02-11 03:11:59,968 INFO o.a.j.JMeter: Default Locale=English (EN)
+2026-02-11 03:11:59,969 INFO o.a.j.JMeter: JMeter  Locale=English (EN)
+2026-02-11 03:11:59,969 INFO o.a.j.JMeter: JMeterHome=C:\Program Files\apache-jmeter-5.6.3
+2026-02-11 03:11:59,969 INFO o.a.j.JMeter: user.dir  =F:\vvd\video-streaming\jmeter
+2026-02-11 03:11:59,969 INFO o.a.j.JMeter: PWD       =F:\vvd\video-streaming\jmeter
+2026-02-11 03:11:59,970 INFO o.a.j.JMeter: IP: 10.32.211.9 Name: JeyJey FullName: JeyJey
+2026-02-11 03:11:59,981 INFO o.a.j.JMeter: Loaded icon properties from org/apache/jmeter/images/icon.properties
+2026-02-11 03:12:00,169 INFO o.a.j.JMeterGuiLauncher: Setting LAF to: com.github.weisj.darklaf.DarkLaf:com.github.weisj.darklaf.theme.DarculaTheme
+2026-02-11 03:12:01,879 INFO o.a.j.JMeterGuiLauncher: Loading file: video-streaming.jmx
+2026-02-11 03:12:01,881 INFO o.a.j.s.FileServer: Default base='F:\vvd\video-streaming\jmeter'
+2026-02-11 03:12:01,882 INFO o.a.j.s.FileServer: Set new base='F:\vvd\video-streaming\jmeter'
+2026-02-11 03:12:02,321 INFO o.a.j.s.SaveService: Testplan (JMX) version: 2.2. Testlog (JTL) version: 2.2
+2026-02-11 03:12:02,343 INFO o.a.j.s.SaveService: Using SaveService properties version 5.0
+2026-02-11 03:12:02,347 INFO o.a.j.s.SaveService: Using SaveService properties file encoding UTF-8
+2026-02-11 03:12:02,349 INFO o.a.j.s.SaveService: Loading file: video-streaming.jmx
+2026-02-11 03:12:02,394 INFO o.a.j.p.h.s.HTTPSamplerBase: Parser for text/html is org.apache.jmeter.protocol.http.parser.LagartoBasedHtmlParser
+2026-02-11 03:12:02,395 INFO o.a.j.p.h.s.HTTPSamplerBase: Parser for application/xhtml+xml is org.apache.jmeter.protocol.http.parser.LagartoBasedHtmlParser
+2026-02-11 03:12:02,395 INFO o.a.j.p.h.s.HTTPSamplerBase: Parser for application/xml is org.apache.jmeter.protocol.http.parser.LagartoBasedHtmlParser
+2026-02-11 03:12:02,395 INFO o.a.j.p.h.s.HTTPSamplerBase: Parser for text/xml is org.apache.jmeter.protocol.http.parser.LagartoBasedHtmlParser
+2026-02-11 03:12:02,395 INFO o.a.j.p.h.s.HTTPSamplerBase: Parser for text/vnd.wap.wml is org.apache.jmeter.protocol.http.parser.RegexpHTMLParser
+2026-02-11 03:12:02,395 INFO o.a.j.p.h.s.HTTPSamplerBase: Parser for text/css is org.apache.jmeter.protocol.http.parser.CssParser
+2026-02-11 03:12:02,414 INFO o.a.j.s.FileServer: Set new base='F:\vvd\video-streaming\jmeter'
