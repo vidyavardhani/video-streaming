@@ -11,7 +11,8 @@
     "prod": "NODE_ENV=production nodemon server.js",
     "seed": "node jmeter/scripts/seed-for-jmeter.js",
     "seed:stage": "NODE_ENV=staging node jmeter/scripts/seed-for-jmeter.js",
-    "seed:prod": "NODE_ENV=production node jmeter/scripts/seed-for-jmeter.js"
+    "seed:prod": "NODE_ENV=production node jmeter/scripts/seed-for-jmeter.js",
+    "seed:db": "node scripts/seed-db.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

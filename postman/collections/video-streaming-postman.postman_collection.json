@@ -1,0 +1,36 @@
+{
+  "info": {
+    "_postman_id": "6e186139-4f3d-4d30-a83a-977c7b34265f",
+    "name": "video-streaming-postman",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "login",
+      "id": "6509c7de-56d3-4243-8198-ef8da901ae56",
+      "request": {
+        "method": "POST",
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:4000/register",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "4000",
+          "path": [
+            "register"
+          ]
+        }
+      }
+    }
+  ]
+}

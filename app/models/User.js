@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { ROLES, USER_STATUS_LIST } = require('../../config/constants');
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -17,13 +18,13 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['teacher', 'student', 'admin'],
+    enum: ROLES,
     default: 'student'
   },
   status: {
     type: String,
-    enum: ['offline', 'online'],
-    default: 'offline'
+    enum: USER_STATUS_LIST,
+    default: USER_STATUS_LIST[0]
   },
   currentClass: {
     type: mongoose.Schema.Types.ObjectId,

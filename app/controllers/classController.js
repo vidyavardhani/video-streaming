@@ -4,6 +4,12 @@ const User = require('../models/User');
 const { getIO } = require('../sockets/io');
 const config = require('../../config/config');
 const logger = require('../../config/logger');
+const {
+  HOST_ROLES,
+  CLASS_STATUS,
+  PARTICIPANT_STATUS,
+  USER_STATUS
+} = require('../../config/constants');
 
 const generateMeetingCode = () => {
   const digits = Math.floor(100000000 + Math.random() * 900000000).toString();
@@ -17,7 +23,7 @@ exports.createClass = async (req, res) => {
   }
   try {
     const host = req.user;
-    if (host.role !== 'teacher' && host.role !== 'admin') {
+    if (!HOST_ROLES.includes(host.role)) {
       return res.status(403).json({ message: 'Only teachers can create classes' });
     }
     const { title } = req.body;
@@ -35,6 +41,7 @@ exports.createClass = async (req, res) => {
     } catch (error) {
       io = null;
     }
+    logger.info('[class] Class created', { classId: newClass._id, hostId: host._id, title: newClass.title });
     res.status(201).json({
       classId: newClass._id,
       meetingLink: newClass.meetingLink,
@@ -44,8 +51,8 @@ exports.createClass = async (req, res) => {
       io.to(host._id.toString()).emit('class-created', newClass);
     }
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to create class' });
+    logger.error('[class] createClass failed', error);
+    res.status(500).json({ message: 'Failed to create class', error: error.message });
   }
 };
 
@@ -58,7 +65,7 @@ exports.startClass = async (req, res) => {
     if (classItem.host.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Only host can start class' });
     }
-    classItem.status = 'live';
+    classItem.status = CLASS_STATUS.LIVE;
     classItem.startTime = new Date();
     await classItem.save();
     let io;
@@ -70,10 +77,11 @@ exports.startClass = async (req, res) => {
     if (io) {
       io.to(classItem._id.toString()).emit('class-started', classItem);
     }
+    logger.info('[class] Class started', { classId: classItem._id });
     res.json({ message: 'Class started', class: classItem });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to start class' });
+    logger.error('[class] startClass failed', error);
+    res.status(500).json({ message: 'Failed to start class', error: error.message });
   }
 };
 
@@ -86,11 +94,11 @@ exports.endClass = async (req, res) => {
     if (classItem.host.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Only host can end class' });
     }
-    classItem.status = 'ended';
+    classItem.status = CLASS_STATUS.ENDED;
     classItem.endTime = new Date();
     const updates = classItem.participants.map(async (p) => {
       if (p.user) {
-        await User.findByIdAndUpdate(p.user, { status: 'offline', currentClass: null });
+        await User.findByIdAndUpdate(p.user, { status: USER_STATUS.OFFLINE, currentClass: null });
       }
     });
     await Promise.all(updates);
@@ -104,10 +112,11 @@ exports.endClass = async (req, res) => {
     if (io) {
       io.to(classItem._id.toString()).emit('class-ended', { classId: classItem._id });
     }
+    logger.info('[class] Class ended', { classId: classItem._id });
     res.json({ message: 'Class ended' });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to end class' });
+    logger.error('[class] endClass failed', error);
+    res.status(500).json({ message: 'Failed to end class', error: error.message });
   }
 };
 
@@ -125,7 +134,7 @@ exports.joinClass = async (req, res) => {
     classItem.lobby.push({
       user: req.user ? req.user._id : undefined,
       displayName: displayName || req.user?.name,
-      status: 'pending'
+      status: PARTICIPANT_STATUS.PENDING
     });
     await classItem.save();
     let io;
@@ -139,8 +148,8 @@ exports.joinClass = async (req, res) => {
     }
     res.json({ message: 'Request sent to host', lobby: classItem.lobby });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to join class' });
+    logger.error('[class] joinClass failed', error);
+    res.status(500).json({ message: 'Failed to join class', error: error.message });
   }
 };
 
@@ -159,10 +168,10 @@ exports.admitStudent = async (req, res) => {
       return res.status(404).json({ message: 'Student not in lobby' });
     }
     const lobbyEntry = classItem.lobby.splice(lobbyIndex, 1)[0];
-    lobbyEntry.status = 'admitted';
+    lobbyEntry.status = PARTICIPANT_STATUS.ADMITTED;
     classItem.participants.push(lobbyEntry);
     await classItem.save();
-    await User.findByIdAndUpdate(lobbyEntry.user, { status: 'online', currentClass: classItem._id });
+    await User.findByIdAndUpdate(lobbyEntry.user, { status: USER_STATUS.ONLINE, currentClass: classItem._id });
     const isRelay = classItem.participants.length <= 6;
     const lobbyData = typeof lobbyEntry.toObject === 'function' ? lobbyEntry.toObject() : { ...lobbyEntry };
     const payload = { ...lobbyData, isRelay };
@@ -187,8 +196,8 @@ exports.admitStudent = async (req, res) => {
     }
     res.json({ message: 'Student admitted', participants: classItem.participants });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to admit student' });
+    logger.error('[class] admitStudent failed', error);
+    res.status(500).json({ message: 'Failed to admit student', error: error.message });
   }
 };
 
@@ -223,9 +232,9 @@ exports.admitStudentsBatch = async (req, res) => {
         continue;
       }
       const lobbyEntry = classItem.lobby.splice(lobbyIndex, 1)[0];
-      lobbyEntry.status = 'admitted';
+      lobbyEntry.status = PARTICIPANT_STATUS.ADMITTED;
       classItem.participants.push(lobbyEntry);
-      await User.findByIdAndUpdate(lobbyEntry.user, { status: 'online', currentClass: classItem._id });
+      await User.findByIdAndUpdate(lobbyEntry.user, { status: USER_STATUS.ONLINE, currentClass: classItem._id });
       const isRelay = classItem.participants.length <= 6;
       const lobbyData = typeof lobbyEntry.toObject === 'function' ? lobbyEntry.toObject() : { ...lobbyEntry };
       const payload = { ...lobbyData, isRelay };
@@ -251,8 +260,8 @@ exports.admitStudentsBatch = async (req, res) => {
       errors: errors.length ? errors : undefined
     });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to admit students' });
+    logger.error('[class] admitStudentsBatch failed', error);
+    res.status(500).json({ message: 'Failed to admit students', error: error.message });
   }
 };
 
@@ -269,7 +278,7 @@ exports.removeStudent = async (req, res) => {
     classItem.participants = classItem.participants.filter((participant) => {
       const match = participant.user && participant.user.toString() === studentId;
       if (match) {
-        User.findByIdAndUpdate(participant.user, { status: 'offline', currentClass: null }).exec();
+        User.findByIdAndUpdate(participant.user, { status: USER_STATUS.OFFLINE, currentClass: null }).exec();
       }
       return !match;
     });
@@ -290,8 +299,8 @@ exports.removeStudent = async (req, res) => {
     }
     res.json({ message: 'Student removed', participants: classItem.participants });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to remove student' });
+    logger.error('[class] removeStudent failed', error);
+    res.status(500).json({ message: 'Failed to remove student', error: error.message });
   }
 };
 
@@ -305,19 +314,19 @@ exports.getClassDetails = async (req, res) => {
     }
     res.json(classItem);
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to get class details' });
+    logger.error('[class] getClassDetails failed', error);
+    res.status(500).json({ message: 'Failed to get class details', error: error.message });
   }
 };
 
 exports.getLiveClasses = async (req, res) => {
   try {
-    const classes = await ClassModel.find({ status: 'live' })
+    const classes = await ClassModel.find({ status: CLASS_STATUS.LIVE })
       .populate('host', 'name email');
     res.json(classes);
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to get live classes' });
+    logger.error('[class] getLiveClasses failed', error);
+    res.status(500).json({ message: 'Failed to get live classes', error: error.message });
   }
 };
 
@@ -340,7 +349,7 @@ exports.updateRecordingUrl = async (req, res) => {
     
     res.json({ message: 'Recording URL updated', class: classItem });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to update recording URL' });
+    logger.error('[class] updateRecordingUrl failed', error);
+    res.status(500).json({ message: 'Failed to update recording URL', error: error.message });
   }
 };

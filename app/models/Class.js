@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { PARTICIPANT_STATUS_LIST, CLASS_STATUS_LIST } = require('../../config/constants');
 
 const participantSchema = new mongoose.Schema({
   user: {
@@ -9,8 +10,8 @@ const participantSchema = new mongoose.Schema({
   socketId: String,
   status: {
     type: String,
-    enum: ['pending', 'admitted', 'removed'],
-    default: 'pending'
+    enum: PARTICIPANT_STATUS_LIST,
+    default: PARTICIPANT_STATUS_LIST[0]
   }
 }, { _id: false });
 
@@ -26,8 +27,8 @@ const classSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['scheduled', 'live', 'ended'],
-    default: 'scheduled'
+    enum: CLASS_STATUS_LIST,
+    default: CLASS_STATUS_LIST[0]
   },
   meetingLink: {
     type: String

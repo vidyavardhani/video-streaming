@@ -4,7 +4,14 @@ node_modules
 .env.development.local
 .env.test.local
 .env.production.local
+.env.staging.local
 .env.development
 .env.test
 .env.production
+.env.staging
 package-lock.json
+jmeter/results
+jmeter/report
+jmeter/data
+jmeter/scripts
+jmeter/video-streaming.jmx

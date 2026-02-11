@@ -26,8 +26,8 @@ exports.sendMessage = async (req, res) => {
     }
     res.status(201).json(chat);
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to send message' });
+    logger.error('[chat] sendMessage failed', error);
+    res.status(500).json({ message: 'Failed to send message', error: error.message });
   }
 };
 
@@ -37,8 +37,8 @@ exports.getMessages = async (req, res) => {
       .sort({ createdAt: 1 });
     res.json(messages);
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to fetch messages' });
+    logger.error('[chat] getMessages failed', error);
+    res.status(500).json({ message: 'Failed to fetch messages', error: error.message });
   }
 };
 
@@ -63,7 +63,7 @@ exports.deleteMessage = async (req, res) => {
     }
     res.json({ message: 'Message removed' });
   } catch (error) {
-    logger.error(error);
-    res.status(500).json({ message: 'Failed to delete message' });
+    logger.error('[chat] deleteMessage failed', error);
+    res.status(500).json({ message: 'Failed to delete message', error: error.message });
   }
 };

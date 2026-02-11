@@ -1,0 +1,25 @@
+node_modules
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+*.md
+# docs
+jmeter
+postman
+.postman
+.postman_collection
+.postman_environment
+.vscode
+.cursor
+*.log
+.DS_Store
+.dockerignore
+.docker-compose.yml
+.docker-compose.development.yml
+.docker-compose.staging.yml
+.docker-compose.production.yml
+.docker-compose.test.yml
+.docker-compose.yml
+.docker-compose.yml

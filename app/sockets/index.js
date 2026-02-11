@@ -3,6 +3,7 @@ const Chat = require('../models/Chat');
 const User = require('../models/User');
 const { init } = require('./io');
 const logger = require('../../config/logger');
+const { USER_STATUS } = require('../../config/constants');
 
 const activeUsers = new Map();
 
@@ -22,7 +23,7 @@ module.exports = (io) => {
 
         if (userId) {
           socket.join(userId);
-          await User.findByIdAndUpdate(userId, { status: 'online', currentClass: classId });
+          await User.findByIdAndUpdate(userId, { status: USER_STATUS.ONLINE, currentClass: classId });
         }
 
         // Update participant socketId
@@ -88,16 +89,20 @@ module.exports = (io) => {
     });
 
     socket.on('disconnect', async () => {
-      const session = activeUsers.get(socket.id);
-      if (session) {
-        activeUsers.delete(socket.id);
-        if (session.userId) {
-          await User.findByIdAndUpdate(session.userId, { status: 'offline', currentClass: null });
+      try {
+        const session = activeUsers.get(socket.id);
+        if (session) {
+          activeUsers.delete(socket.id);
+          if (session.userId) {
+            await User.findByIdAndUpdate(session.userId, { status: USER_STATUS.OFFLINE, currentClass: null });
+          }
+          io.to(session.classId).emit('participant-left', {
+            socketId: socket.id,
+            userId: session.userId
+          });
         }
-        io.to(session.classId).emit('participant-left', {
-          socketId: socket.id,
-          userId: session.userId
-        });
+      } catch (error) {
+        logger.error('[sockets] disconnect handler error', error);
       }
     });
   });

@@ -1,3 +1,5 @@
+const { ROLES } = require('../config/constants');
+
 module.exports = {
   openapi: '3.0.0',
   info: {
@@ -26,6 +28,46 @@ module.exports = {
     }
   ],
   paths: {
+    '/health': {
+      get: {
+        summary: 'Basic health check',
+        description: 'Returns status, uptime, and version. Use for load balancers and readiness probes. Returns 503 if database is disconnected.',
+        security: [],
+        responses: {
+          200: { description: 'Service and database are healthy' },
+          503: { description: 'Service unhealthy (e.g. database disconnected)' }
+        }
+      }
+    },
+    '/health/detailed': {
+      get: {
+        summary: 'Detailed health check',
+        description: 'Returns database ping latency, process memory, uptime, and safe config flags. Use for debugging and monitoring dashboards.',
+        security: [],
+        responses: {
+          200: {
+            description: 'Detailed health info (status may be ok or degraded)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string', enum: ['ok', 'degraded', 'unhealthy'] },
+                    timestamp: { type: 'string', format: 'date-time' },
+                    version: { type: 'string' },
+                    uptime: { type: 'object', properties: { seconds: { type: 'integer' }, human: { type: 'string' } } },
+                    database: { type: 'object', properties: { status: { type: 'string' }, latencyMs: { type: 'integer' } } },
+                    process: { type: 'object', properties: { pid: { type: 'integer' }, memory: { type: 'object' } } },
+                    config: { type: 'object' }
+                  }
+                }
+              }
+            }
+          },
+          503: { description: 'Service unhealthy' }
+        }
+      }
+    },
     '/auth/register': {
       post: {
         summary: 'Register a new user',
@@ -39,7 +81,7 @@ module.exports = {
                   name: { type: 'string' },
                   email: { type: 'string' },
                   password: { type: 'string' },
-                  role: { type: 'string', enum: ['teacher', 'student'] }
+                  role: { type: 'string', enum: ROLES }
                 },
                 required: ['name', 'email', 'password', 'role']
               }
